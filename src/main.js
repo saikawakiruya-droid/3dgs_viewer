@@ -43,29 +43,7 @@ function applyQuality(spark, renderer, name) {
   if (typeof spark.setDirty === 'function') spark.setDirty();
 }
 
-// splat（.rad/.spz/.ply）の実ダウンロード量カウンタ。
-// R2 は cross-origin で TAO 無し＝Resource Timing の transferSize は 0 になるが、
-// CORS ExposeHeaders に Content-Length を公開しているため、fetch をラップして
-// 各 Range レスポンスの Content-Length を合算すれば実 DL 量を測れる（TAO 不要）。
-const download = { bytes: 0 };
-function installDownloadCounter() {
-  if (typeof window.fetch !== 'function' || window.__dlCounterInstalled) return;
-  window.__dlCounterInstalled = true;
-  const orig = window.fetch.bind(window);
-  window.fetch = async (input, init) => {
-    const res = await orig(input, init);
-    try {
-      const url = typeof input === 'string' ? input : (input && input.url) || '';
-      if (/\.(rad|spz|ply)(\?|$)/i.test(url)) {
-        const cl = res.headers.get('content-length');
-        if (cl) download.bytes += parseInt(cl, 10) || 0;
-      }
-    } catch (_) { /* noop */ }
-    return res;
-  };
-}
-
-/** FPS / メモリ / LOD 常駐 splat 数 / 実DL量 を表示する軽量パネル。tick() を毎フレーム呼ぶ。 */
+/** FPS / メモリ / LOD 常駐 splat 数 を表示する軽量パネル。tick() を毎フレーム呼ぶ。 */
 function createStatsUI(spark) {
   const el = document.createElement('div');
   el.style.cssText =
@@ -91,8 +69,8 @@ function createStatsUI(spark) {
         if (spark && typeof spark.lodSplatCount === 'number') {
           parts.push(`Splats ${(spark.lodSplatCount / 1e6).toFixed(1)}M`);
         }
-        // splat の実ダウンロード量（R2 からの転送。TAO 無しでも Content-Length 合算で計測）。
-        parts.push(`DL ${(download.bytes / 1048576).toFixed(1)}MB`);
+        // 実DL量は Spark が Worker 内 fetch で取得するためメインスレッドから計測不可。
+        // 正確な値は DevTools → Network（.rad の Transferred）で確認する。
         el.textContent = parts.join('  |  ');
       }
     },
@@ -393,7 +371,6 @@ async function frameCameraToSplat(splat, camera, controls) {
 }
 
 async function main() {
-  installDownloadCounter(); // Spark の fetch より前に仕込む（実DL量計測）
   const container = document.getElementById('canvas-container');
   const music = setupAudio(); // BGM（T キー＝体操開始で再生制御）
 
