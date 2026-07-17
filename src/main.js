@@ -69,6 +69,114 @@ function waitForLoad(splat) {
   return Promise.race([load, timeout]);
 }
 
+// ─────────────────────────────────────────────
+// 向き補正 & カメラ自動枠取り（参考: ../Metavarse_3dgs ViewerApp._orientSplat / _frameToScene）。
+// ─────────────────────────────────────────────
+const FRAME = {
+  DISTANCE_FACTOR: 0.9, // カメラ距離 = 最大辺 × これ
+  MAX_SAMPLES: 150_000, // bbox サンプリング上限（重い全反復を間引く）
+  LO_PCT: 0.02, // 外れ値（floater）除外の下側パーセンタイル
+  HI_PCT: 0.98, // 同上側
+  DATA_WAIT_MS: 10_000, // splat データ充填（numSplats>0）の待機上限
+  VIEW_DIR: { x: 0, y: 0.4, z: 1 }, // 斜め上前方から中心を見る方向
+};
+
+/** 3DGS の上下補正。PLY/SPZ は y-down 系が多く three.js（y-up）で上下反転するため X軸180°。 */
+function orientSplat(splat) {
+  if (splat.rotation && typeof splat.rotation.x === 'number') {
+    splat.rotation.x = Math.PI;
+  }
+  if (typeof splat.updateMatrixWorld === 'function') {
+    splat.updateMatrixWorld(true);
+  }
+}
+
+/** forEachSplat で中心をサンプリングし、軸ごと [p2,p98] で外れ値に頑健なローカル境界を作る。 */
+function robustLocalBox(splat, count) {
+  const step = Math.max(1, Math.floor(count / FRAME.MAX_SAMPLES));
+  const xs = [];
+  const ys = [];
+  const zs = [];
+  let i = 0;
+  splat.forEachSplat((index, center) => {
+    if (i++ % step !== 0) return;
+    xs.push(center.x);
+    ys.push(center.y);
+    zs.push(center.z);
+  });
+  if (xs.length === 0) return null;
+  const pct = (arr, p) => {
+    arr.sort((a, b) => a - b);
+    const idx = Math.min(arr.length - 1, Math.max(0, Math.floor(p * (arr.length - 1))));
+    return arr[idx];
+  };
+  const box = new THREE.Box3(
+    new THREE.Vector3(pct(xs, FRAME.LO_PCT), pct(ys, FRAME.LO_PCT), pct(zs, FRAME.LO_PCT)),
+    new THREE.Vector3(pct(xs, FRAME.HI_PCT), pct(ys, FRAME.HI_PCT), pct(zs, FRAME.HI_PCT))
+  );
+  return box.isEmpty() ? null : box;
+}
+
+/** SplatMesh のワールド境界（matrixWorld=180°補正込み）を算出。取得不能時は null。 */
+async function computeSplatWorldBox(splat) {
+  try {
+    const splatCount = () => splat.numSplats || splat.packedSplats?.numSplats || 0;
+    // データ充填を待つ（numSplats を提供する実 Spark でのみ意味を持つ）。
+    if (typeof splat.numSplats === 'number' || splat.packedSplats) {
+      const start = performance.now();
+      while (splatCount() === 0 && performance.now() - start < FRAME.DATA_WAIT_MS) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    // 1) 外れ値に頑健なローカル境界を優先（floater が生境界を数倍に膨張させるため）。
+    let localBox = null;
+    if (typeof splat.forEachSplat === 'function' && splatCount() > 0) {
+      localBox = robustLocalBox(splat, splatCount());
+    }
+    // 2) フォールバック: getBoundingBox（生境界）。
+    if (!localBox && typeof splat.getBoundingBox === 'function') {
+      const local = splat.getBoundingBox();
+      if (local?.min && local?.max) {
+        localBox = new THREE.Box3(
+          new THREE.Vector3(local.min.x, local.min.y, local.min.z),
+          new THREE.Vector3(local.max.x, local.max.y, local.max.z)
+        );
+      }
+    }
+    if (!localBox || localBox.isEmpty()) return null;
+    if (typeof splat.updateMatrixWorld === 'function') splat.updateMatrixWorld(true);
+    if (splat.matrixWorld) localBox.applyMatrix4(splat.matrixWorld);
+    return localBox.isEmpty() ? null : localBox;
+  } catch (e) {
+    console.warn('[viewer] シーン境界の取得に失敗、初期視点配置をスキップ:', e);
+    return null;
+  }
+}
+
+/** splat の bounding box からカメラ位置・注視点・クリップ面を自動調整する。 */
+async function frameCameraToSplat(splat, camera, controls) {
+  const box = await computeSplatWorldBox(splat);
+  if (!box || box.isEmpty()) return;
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxExtent = Math.max(size.x, size.y, size.z) || 1;
+
+  const dir = new THREE.Vector3(FRAME.VIEW_DIR.x, FRAME.VIEW_DIR.y, FRAME.VIEW_DIR.z).normalize();
+  const distance = maxExtent * FRAME.DISTANCE_FACTOR;
+  camera.position.set(
+    center.x + dir.x * distance,
+    center.y + dir.y * distance,
+    center.z + dir.z * distance
+  );
+  // クリップ面をシーン規模へ（巨大/微小シーンでも near/far に収める）。
+  camera.near = Math.max(maxExtent / 1000, 0.01);
+  camera.far = maxExtent * 100;
+  camera.updateProjectionMatrix();
+
+  controls.target.copy(center);
+  controls.update();
+}
+
 async function main() {
   const container = document.getElementById('canvas-container');
 
@@ -124,6 +232,8 @@ async function main() {
     const splat = new SplatMesh({ url: target.url });
     await waitForLoad(splat);
     scene.add(splat);
+    orientSplat(splat); // 上下補正（X軸180°）
+    await frameCameraToSplat(splat, camera, controls); // bbox からカメラ自動枠取り
     setStatus(`表示中: ${target.label}`);
   } catch (e) {
     console.error('[viewer] splat 読込失敗:', e);
