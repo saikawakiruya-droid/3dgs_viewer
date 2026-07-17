@@ -13,7 +13,26 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
-import { MANIFEST_URL, ASSET_BASE, RENDER_CONFIG, LOAD_TIMEOUT_MS } from './config.js';
+import {
+  MANIFEST_URL,
+  ASSET_BASE,
+  RENDER_CONFIG,
+  LOAD_TIMEOUT_MS,
+  SPARK_CONFIG,
+  LOD_QUALITY,
+} from './config.js';
+
+const DEG = Math.PI / 180;
+
+/** url 末尾の拡張子（クエリ除去, 小文字）。 */
+function extOf(url) {
+  return (url.split('?')[0].split('.').pop() || '').toLowerCase();
+}
+
+/** RAD/SPZ は LOD ツリーを持つ。生 PLY は LOD 無。 */
+function isLodFormat(ext) {
+  return ext === 'rad' || ext === 'spz';
+}
 
 /** 相対 url は ASSET_BASE を前置し、絶対 URL（http/https）はそのまま返す。 */
 function resolveAssetUrl(url) {
@@ -52,25 +71,45 @@ async function resolveSplatUrl() {
   return {
     url: resolveAssetUrl(entry.url),
     label: entry.name || entry.id,
-    viewpoint: entry.viewpoint, // 任意: 保存済み開始視点（scenes.json）。無ければ自動枠取り。
+    camera: entry.camera, // 任意: 手調整カメラ { pos:[x,y,z], look:[x,y,z] }（検証システム方式）
+    orient: entry.orient, // 任意: 向き { rx, ry, rz }（度）。無指定は既定 rx=180。
+    viewpoint: entry.viewpoint, // 後方互換: { position, target, fov? }。camera が無い場合に使用。
   };
 }
 
-/** SplatMesh の読込完了を待つ（spark v2.x は onFinishedLoading）。60s タイムアウト付き。 */
-function waitForLoad(splat) {
-  const load = new Promise((resolve) => {
-    if ('onFinishedLoading' in splat) {
-      splat.onFinishedLoading = () => resolve();
-    } else if (splat.ready instanceof Promise) {
-      splat.ready.then(resolve);
-    } else {
-      setTimeout(resolve, 300);
-    }
+/**
+ * SplatMesh を LOD 対応で生成する（検証システム ~/Desktop/splats/viewer と同方式）。
+ * RAD/SPZ は lod ツリーで段階ロード、生 PLY は全 splat 常駐。
+ * onLoad / onError / mesh.initialized のいずれかで解決し、LOAD_TIMEOUT_MS で打ち切る。
+ * @returns {{ mesh: SplatMesh, loaded: Promise<void> }}
+ */
+function loadSplatMesh(url) {
+  const isLod = isLodFormat(extOf(url));
+  let settle;
+  const loaded = new Promise((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) { done = true; reject(new Error(`splat load timeout (${LOAD_TIMEOUT_MS / 1000}s)`)); }
+    }, LOAD_TIMEOUT_MS);
+    settle = (err) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      err ? reject(err) : resolve();
+    };
   });
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`splat load timeout (${LOAD_TIMEOUT_MS / 1000}s)`)), LOAD_TIMEOUT_MS)
-  );
-  return Promise.race([load, timeout]);
+  const mesh = new SplatMesh({
+    url,
+    lod: isLod,
+    nonLod: true,
+    onLoad: () => settle(),
+    onError: (e) => settle(e || new Error('splat load error')),
+  });
+  // initialized が拒否された場合も拾う（onError と両方は発火しない前提でガード済み）。
+  if (mesh.initialized && typeof mesh.initialized.catch === 'function') {
+    mesh.initialized.catch((e) => settle(e || new Error('splat init error')));
+  }
+  return { mesh, loaded };
 }
 
 // ─────────────────────────────────────────────
@@ -85,14 +124,42 @@ const FRAME = {
   VIEW_DIR: { x: 0, y: 0.4, z: 1 }, // 斜め上前方から中心を見る方向
 };
 
-/** 3DGS の上下補正。PLY/SPZ は y-down 系が多く three.js（y-up）で上下反転するため X軸180°。 */
-function orientSplat(splat) {
-  if (splat.rotation && typeof splat.rotation.x === 'number') {
-    splat.rotation.x = Math.PI;
+/**
+ * シーンの向き { rx, ry, rz }（度）を解決する（検証システム orientOf 準拠）。
+ * -Y-up で学習された 3DGS は既定の X軸180° で上向きに直る。無指定は rx=180。
+ * 点群等 up 軸が異なるシーンは orient で上書きする（例: { rx: 90 }）。
+ */
+function orientOf(entry) {
+  const o = (entry && entry.orient) || {};
+  return { rx: o.rx ?? 180, ry: o.ry ?? 0, rz: o.rz ?? 0 };
+}
+
+/** 向き（度）を splat に適用する。 */
+function applyOrient(splat, o) {
+  if (splat.rotation && typeof splat.rotation.set === 'function') {
+    splat.rotation.set(o.rx * DEG, o.ry * DEG, o.rz * DEG);
   }
   if (typeof splat.updateMatrixWorld === 'function') {
     splat.updateMatrixWorld(true);
   }
+}
+
+/** 有限数 3 要素の配列 [x,y,z] か。 */
+function isVec3Arr(a) {
+  return Array.isArray(a) && a.length === 3 && a.every((n) => typeof n === 'number' && Number.isFinite(n));
+}
+
+/**
+ * 手調整カメラ { pos:[x,y,z], look:[x,y,z] } を適用する（検証システム方式）。
+ * camera.position.set(...pos) + controls.target(...look) + lookAt。適用したら true。
+ */
+function applyCamera(cam, camera, controls) {
+  if (!cam || !isVec3Arr(cam.pos) || !isVec3Arr(cam.look)) return false;
+  camera.position.set(cam.pos[0], cam.pos[1], cam.pos[2]);
+  camera.lookAt(cam.look[0], cam.look[1], cam.look[2]);
+  controls.target.set(cam.look[0], cam.look[1], cam.look[2]);
+  controls.update();
+  return true;
 }
 
 /** forEachSplat で中心をサンプリングし、軸ごと [p2,p98] で外れ値に頑健なローカル境界を作る。 */
@@ -229,7 +296,17 @@ async function main() {
   camera.position.set(p.x, p.y, p.z);
 
   // ── Spark: SparkRenderer を scene に add すると splat 描画が有効化される ──
-  const spark = new SparkRenderer({ renderer });
+  // LOD 再walk/再ソートを描画パスから外し（preUpdate:false）、再ソートを間引く（RAD/SPZ 用）。
+  const spark = new SparkRenderer({
+    renderer,
+    preUpdate: SPARK_CONFIG.PRE_UPDATE,
+    minSortIntervalMs: SPARK_CONFIG.MIN_SORT_INTERVAL_MS,
+  });
+  // LOD 画質（RAD/SPZ のみ効く。生 PLY はツリー無で無効）。
+  spark.lodSplatCount = LOD_QUALITY.lodSplatCount;
+  spark.lodRenderScale = LOD_QUALITY.lodRenderScale;
+  spark.maxStdDev = LOD_QUALITY.maxStdDev;
+  spark.blurAmount = LOD_QUALITY.blurAmount;
   scene.add(spark);
 
   // ── camera controls ──
@@ -237,20 +314,16 @@ async function main() {
   controls.enableDamping = true;
 
   // ── 視点キャプチャ（開発補助）──
-  // V キーで現在のカメラ視点を scenes.json の "viewpoint" へ貼り付けられる形で console 出力。
-  // Spark で決めた構図を手元で再現 → V → 出力値を該当シーンに貼るとその視点で起動する。
+  // V キーで現在のカメラを scenes.json の "camera": { pos, look } 形式で console 出力。
+  // 構図を手元で再現 → V → 出力値を該当シーンに貼るとその視点で起動する（検証システム方式）。
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'v' && e.key !== 'V') return;
     const r = (n) => Math.round(n * 1000) / 1000;
     const p = camera.position;
     const t = controls.target;
-    const vp = {
-      position: { x: r(p.x), y: r(p.y), z: r(p.z) },
-      target: { x: r(t.x), y: r(t.y), z: r(t.z) },
-      fov: camera.fov,
-    };
-    console.log('[viewer] 現在の視点（scenes.json の "viewpoint" に貼り付け）:\n' + JSON.stringify(vp, null, 2));
-    setStatus('視点をコンソールに出力しました（V キー）');
+    const cam = { pos: [r(p.x), r(p.y), r(p.z)], look: [r(t.x), r(t.y), r(t.z)] };
+    console.log('[viewer] 現在のカメラ（scenes.json の "camera" に貼り付け）:\n' + JSON.stringify(cam));
+    setStatus('カメラをコンソールに出力しました（V キー）');
   });
 
   // ── resize ──
@@ -275,12 +348,16 @@ async function main() {
 
   setStatus(`読込中: ${target.label} …`);
   try {
-    const splat = new SplatMesh({ url: target.url });
-    await waitForLoad(splat);
+    // LOD 対応でロード。mesh は先に scene へ add（RAD/SPZ は add 後に段階ストリーム）。
+    const { mesh: splat, loaded } = loadSplatMesh(target.url);
+    applyOrient(splat, orientOf(target)); // 向き（既定 rx=180 / per-scene orient）
     scene.add(splat);
-    orientSplat(splat); // 上下補正（X軸180°）
-    // 保存済み開始視点があればそれを優先。無ければ bbox から自動枠取り。
-    if (!applyViewpoint(target.viewpoint, camera, controls)) {
+    await loaded;
+    // カメラ: 手調整 camera{pos,look} を最優先 → 後方互換 viewpoint → bbox 自動枠取り。
+    if (
+      !applyCamera(target.camera, camera, controls) &&
+      !applyViewpoint(target.viewpoint, camera, controls)
+    ) {
       await frameCameraToSplat(splat, camera, controls);
     }
     setStatus(`表示中: ${target.label}`);

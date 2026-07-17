@@ -8,3 +8,7 @@ dist/
 # splat アセットはリポジトリに含めない（リモート配信＝CDN/オブジェクトストレージ前提）。
 public/scenes/*.ply
 public/scenes/*.spz
+
+# LOD 形式（自己完結 .rad / チャンク .radc）も大容量のためリポに含めない。
+public/**/*.rad
+public/**/*.radc

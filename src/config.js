@@ -30,6 +30,25 @@ export const RENDER_CONFIG = {
 export const LOAD_TIMEOUT_MS = 60_000;
 
 // ─────────────────────────────────────────────
+// Spark LOD / 画質設定（検証システム ~/Desktop/splats/viewer の実績値に準拠）。
+// RAD/SPZ は LOD ツリーを持つため lodSplatCount 等が効く。生 PLY は LOD 無で無効。
+// - preUpdate:false … LOD 再walk/再ソートを描画パスから外しカメラ移動を滑らかに。
+// - minSortIntervalMs … 毎フレームではなく ~30回/秒に再ソートを間引く。
+// ─────────────────────────────────────────────
+export const SPARK_CONFIG = {
+  PRE_UPDATE: false,
+  MIN_SORT_INTERVAL_MS: 33,
+};
+
+// LOD 画質（検証システムの "medium" 相当）。lodSplatCount が常駐 splat 数＝主コスト。
+export const LOD_QUALITY = {
+  lodSplatCount: 2_500_000,
+  lodRenderScale: 1.0,
+  maxStdDev: 2.83,
+  blurAmount: 0.2,
+};
+
+// ─────────────────────────────────────────────
 // 後続フェーズ用（現在は未使用）。メタバース本体と同一の WebSocket サーバーを共用する。
 // 有効化時は websocket-manager / binary-protocol を MetaVarsee から移植し、
 // binary-protocol.js のワイヤフォーマットを両者で一致させること。

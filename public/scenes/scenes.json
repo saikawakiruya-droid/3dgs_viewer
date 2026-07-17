@@ -1,9 +1,14 @@
 {
-  "_note": "url は MetaVarsee と同一サーバー上の splat 配信パス（相対）。配信ベースは VITE_ASSET_BASE で前置。絶対URL(http…)を直接書いてもよい。ローカルにアセットは置かない。",
-  "_viewpoint": "任意: 各シーンに \"viewpoint\": { position:{x,y,z}, target:{x,y,z}, fov? } を付けると起動時にその開始視点になる。無ければ bbox から自動枠取り。ビューアで V キーを押すと現在視点が貼り付け用に console 出力される。",
-  "default": "space-spz",
+  "_note": "url は splat アセットの配信パス（相対）。配信ベースは VITE_ASSET_BASE で前置。絶対URL(http…)を直接書いてもよい。RAD(.rad)/SPZ(.spz) は LOD、生 PLY は LOD 無。",
+  "_camera": "任意: \"camera\": { \"pos\": [x,y,z], \"look\": [x,y,z] } で起動時の手調整視点。無ければ bbox 自動枠取り。V キーで現在カメラを貼り付け用に console 出力。",
+  "_orient": "任意: \"orient\": { \"rx\": 度, \"ry\": 度, \"rz\": 度 }。無指定は既定 rx=180（-Y-up の 3DGS を上向きに）。点群等は rx:90 など。",
+  "default": "shrine-clean",
   "scenes": [
-    { "id": "space-spz", "name": "Space (SPZ, 軽量)", "url": "spz/scene.spz" },
-    { "id": "space-ply", "name": "Space (PLY, 大)", "url": "ply/spaces/scene.ply" }
+    {
+      "id": "shrine-clean",
+      "name": "shrine_clean (SH3, RAD-LOD)",
+      "url": "shrine_clean-lod.rad",
+      "camera": { "pos": [-6, 3.2, 6], "look": [2, 3.0, -1] }
+    }
   ]
 }
