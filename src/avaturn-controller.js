@@ -27,6 +27,7 @@ export class AvaturnController extends BaseAvatarController {
     this.taisoUrl = options.taisoUrl || null; // ラジオ体操 BVH（任意・エモート）
     this.taisoAction = null;
     this._emoting = false; // 体操エモート中か
+    this.music = options.music || null; // 体操と同期する BGM コントローラ（任意）
   }
 
   /**
@@ -128,18 +129,40 @@ export class AvaturnController extends BaseAvatarController {
     if (event.key === 't' || event.key === 'T') this.toggleTaiso();
   }
 
-  /** 体操エモートの開始/停止。 */
+  /**
+   * 体操エモートの開始/停止（音楽と同期）。
+   * - 音楽が止まっている: 音楽を頭から再生 ＋ 体操を頭から（シンクロ）。
+   * - 音楽が流れている: 体操を音楽の再生位置に合わせて開始（続きから）。
+   * - 停止時: 体操をやめて idle へ（音楽は流したまま）。
+   */
   toggleTaiso() {
     if (!this.taisoAction) return;
     this._emoting = !this._emoting;
-    if (this._emoting) {
-      const cur = this.getActionForState(this.currentState);
-      if (cur) cur.fadeOut(0.2);
-      this.taisoAction.reset().fadeIn(0.2).play();
-    } else {
+
+    if (!this._emoting) {
       this.taisoAction.fadeOut(0.2);
       this.transitionToState(LocomotionState.IDLE);
+      return;
     }
+
+    const cur = this.getActionForState(this.currentState);
+    if (cur) cur.fadeOut(0.2);
+
+    // 音楽と同期して開始位置を決める。
+    const dur = this.taisoAction.getClip()?.duration || 0;
+    let startTime = 0;
+    if (this.music) {
+      if (this.music.isPlaying()) {
+        startTime = dur > 0 ? this.music.time() % dur : 0; // 続きから
+      } else {
+        this.music.playFromStart(); // 音楽を頭から
+        startTime = 0;
+      }
+    }
+
+    this.taisoAction.reset();
+    this.taisoAction.time = startTime;
+    this.taisoAction.fadeIn(0.2).play();
   }
 
   /** 体操中は locomotion 遷移を止める。移動入力があれば体操を解除して歩行へ。 */

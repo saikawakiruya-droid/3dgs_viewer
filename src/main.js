@@ -28,25 +28,23 @@ import {
   AUDIO_CONFIG,
 } from './config.js';
 
-/** BGM をセットアップ。autoplay 制限のため、初回のユーザー操作（クリック/キー）で再生開始する。 */
+/**
+ * BGM コントローラを生成する。再生は T キー（体操開始）から制御する。
+ * @returns {{ isPlaying: () => boolean, time: () => number, playFromStart: () => Promise<void> } | null}
+ */
 function setupAudio() {
-  if (!AUDIO_CONFIG.ENABLED) return;
+  if (!AUDIO_CONFIG.ENABLED) return null;
   const audio = new Audio(AUDIO_CONFIG.URL);
   audio.loop = AUDIO_CONFIG.LOOP;
   audio.volume = AUDIO_CONFIG.VOLUME;
-  let started = false;
-  const start = () => {
-    if (started) return;
-    audio.play().then(() => {
-      started = true;
-      window.removeEventListener('pointerdown', start);
-      window.removeEventListener('keydown', start);
-    }).catch(() => { /* まだ操作前など。次の操作で再試行 */ });
+  return {
+    isPlaying: () => !audio.paused,
+    time: () => audio.currentTime,
+    playFromStart() {
+      try { audio.currentTime = 0; } catch (_) { /* noop */ }
+      return audio.play().catch(() => {});
+    },
   };
-  // 自動再生を試み、ブロックされたら初回操作で開始。
-  start();
-  window.addEventListener('pointerdown', start);
-  window.addEventListener('keydown', start);
 }
 
 const DEG = Math.PI / 180;
@@ -302,7 +300,7 @@ async function frameCameraToSplat(splat, camera, controls) {
 
 async function main() {
   const container = document.getElementById('canvas-container');
-  setupAudio(); // BGM（初回操作で再生）
+  const music = setupAudio(); // BGM（T キー＝体操開始で再生制御）
 
   // ── renderer ──
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -356,6 +354,7 @@ async function main() {
   if (controllable) {
     avatarController = new AvaturnController(camera, renderer.domElement, {
       taisoUrl: AVATAR_CONFIG.BVH_URL, // T キーで体操エモート
+      music, // 体操と同期する BGM
     });
   } else {
     controls = new OrbitControls(camera, renderer.domElement);
