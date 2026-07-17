@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:dev": "cross-env VITE_BASE_PATH=/xr/Metavarse_3dgs_viewer/ VITE_ASSET_BASE=/xr/NeccosMetaverse_WebGPU_Dev/ vite build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -14,6 +15,7 @@
     "three": "~0.180.0"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "vite": "^6.0.0"
   }
 }

@@ -3,8 +3,18 @@
  * Phase 1（現在）は 3DGS 描画のみ。マルチプレイヤー（同一サーバー共用）は後続フェーズ。
  */
 
-// 同梱シーンマニフェスト（public/scenes/scenes.json が /scenes/ で配信される）。
-export const MANIFEST_URL = '/scenes/scenes.json';
+// シーンマニフェストの場所。既定はデプロイ成果物に同梱した scenes.json。
+// ローカル前提を持たず、デプロイ/ホスト環境の相対パスで解決する。
+export const MANIFEST_URL = import.meta.env.VITE_MANIFEST_URL || './scenes/scenes.json';
+
+// splat アセットの配信ベース URL。
+// 本ビューアは MetaVarsee と同一 Web サーバー（同一オリジン）に相乗りし、
+// MetaVarsee が既に配信している splat（spz/scene.spz, ply/spaces/scene.ply）を流用する。
+// 既定は MetaVarsee の実デプロイ base（dist/index.html・build:dev より確定）。
+// scenes.json の相対 url はこれを前置して解決する。絶対 URL（http…）はそのまま使う。
+// ローカルにアセットは置かない。必要なら VITE_ASSET_BASE で上書き。
+export const ASSET_BASE =
+  import.meta.env.VITE_ASSET_BASE || '/xr/NeccosMetaverse_WebGPU_Dev/';
 
 // レンダリング設定（既存 Metavarse_3dgs / ViewerApp の実績値に準拠）。
 export const RENDER_CONFIG = {

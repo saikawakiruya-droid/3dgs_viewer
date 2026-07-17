@@ -2,7 +2,9 @@ node_modules/
 dist/
 .DS_Store
 *.log
+.env
+.env.local
 
-# 大容量の 3DGS アセットはリポジトリに含めない（別途配布 / 外部ストレージ参照）。
+# splat アセットはリポジトリに含めない（リモート配信＝CDN/オブジェクトストレージ前提）。
 public/scenes/*.ply
 public/scenes/*.spz

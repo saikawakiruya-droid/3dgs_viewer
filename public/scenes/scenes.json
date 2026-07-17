@@ -1,7 +1,8 @@
 {
-  "default": "shrine-web",
+  "_note": "url は MetaVarsee と同一サーバー上の splat 配信パス（相対）。配信ベースは VITE_ASSET_BASE で前置。絶対URL(http…)を直接書いてもよい。ローカルにアセットは置かない。",
+  "default": "space-spz",
   "scenes": [
-    { "id": "shrine-web", "name": "Shrine (PLY, 軽量)", "url": "/scenes/shrine_web.ply" },
-    { "id": "room", "name": "Room (SPZ)", "url": "/scenes/room.spz" }
+    { "id": "space-spz", "name": "Space (SPZ, 軽量)", "url": "spz/scene.spz" },
+    { "id": "space-ply", "name": "Space (PLY, 大)", "url": "ply/spaces/scene.ply" }
   ]
 }

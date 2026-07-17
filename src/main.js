@@ -13,7 +13,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
-import { MANIFEST_URL, RENDER_CONFIG, LOAD_TIMEOUT_MS } from './config.js';
+import { MANIFEST_URL, ASSET_BASE, RENDER_CONFIG, LOAD_TIMEOUT_MS } from './config.js';
+
+/** 相対 url は ASSET_BASE を前置し、絶対 URL（http/https）はそのまま返す。 */
+function resolveAssetUrl(url) {
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${ASSET_BASE}${url}`;
+}
 
 const statusEl = document.getElementById('status');
 const setStatus = (msg) => {
@@ -24,9 +30,9 @@ const setStatus = (msg) => {
 async function resolveSplatUrl() {
   const params = new URLSearchParams(location.search);
 
-  // 1) ?url= 直接指定が最優先。
+  // 1) ?url= 直接指定が最優先（リモート絶対 URL をそのまま渡せる）。
   const direct = params.get('url');
-  if (direct) return { url: direct, label: direct };
+  if (direct) return { url: resolveAssetUrl(direct), label: direct };
 
   // 2) scenes.json を取得して ?scene=<id> / default を解決。
   let manifest = { scenes: [], default: null };
@@ -43,7 +49,7 @@ async function resolveSplatUrl() {
     scenes.find((s) => s.id === wantId) || scenes[0] || null;
 
   if (!entry) return null;
-  return { url: entry.url, label: entry.name || entry.id };
+  return { url: resolveAssetUrl(entry.url), label: entry.name || entry.id };
 }
 
 /** SplatMesh の読込完了を待つ（spark v2.x は onFinishedLoading）。60s タイムアウト付き。 */
