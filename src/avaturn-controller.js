@@ -1,8 +1,10 @@
+import * as THREE from 'three';
 import {
   retargetAnimationClip,
   getModelBoneNames,
 } from './bone-mapping.js';
 import { yieldToMain } from './parse-utils.js';
+import { loadAndRetargetBVH } from './bvh-retarget.js';
 import { BaseAvatarController, LocomotionState } from './base-avatar-controller.js';
 
 /**
@@ -22,6 +24,9 @@ export class AvaturnController extends BaseAvatarController {
       ...options,
       avatarType: 'avaturn',
     });
+    this.taisoUrl = options.taisoUrl || null; // ラジオ体操 BVH（任意・エモート）
+    this.taisoAction = null;
+    this._emoting = false; // 体操エモート中か
   }
 
   /**
@@ -101,8 +106,54 @@ export class AvaturnController extends BaseAvatarController {
         jump: jumpClip,
       });
 
+      // ラジオ体操 BVH をエモートとして用意（T キーで再生）。
+      if (this.taisoUrl && this.mixer) {
+        try {
+          const taisoClip = await loadAndRetargetBVH(this.taisoUrl, this.model);
+          this.taisoAction = this.mixer.clipAction(taisoClip);
+          this.taisoAction.setLoop(THREE.LoopRepeat);
+        } catch (e) {
+          console.warn('[AvaturnController] 体操 BVH の読込に失敗:', e);
+        }
+      }
+
     } catch (error) {
       console.error('[AvaturnController] Failed to setup animations:', error);
     }
+  }
+
+  /** キー入力: 親の WASD 等に加え、T キーで体操エモートをトグル。 */
+  onKeyDown(event) {
+    super.onKeyDown(event);
+    if (event.key === 't' || event.key === 'T') this.toggleTaiso();
+  }
+
+  /** 体操エモートの開始/停止。 */
+  toggleTaiso() {
+    if (!this.taisoAction) return;
+    this._emoting = !this._emoting;
+    if (this._emoting) {
+      const cur = this.getActionForState(this.currentState);
+      if (cur) cur.fadeOut(0.2);
+      this.taisoAction.reset().fadeIn(0.2).play();
+    } else {
+      this.taisoAction.fadeOut(0.2);
+      this.transitionToState(LocomotionState.IDLE);
+    }
+  }
+
+  /** 体操中は locomotion 遷移を止める。移動入力があれば体操を解除して歩行へ。 */
+  updateAnimation(deltaTime) {
+    if (this._emoting) {
+      if (this.mixer) this.mixer.update(deltaTime);
+      const wantsToMove = this.keys.w || this.keys.a || this.keys.s || this.keys.d;
+      if (wantsToMove) {
+        this._emoting = false;
+        this.taisoAction.fadeOut(0.2);
+        this.transitionToState(LocomotionState.WALK);
+      }
+      return;
+    }
+    super.updateAnimation(deltaTime);
   }
 }

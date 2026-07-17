@@ -354,7 +354,9 @@ async function main() {
   let controls = null;
   let avatarController = null;
   if (controllable) {
-    avatarController = new AvaturnController(camera, renderer.domElement, {});
+    avatarController = new AvaturnController(camera, renderer.domElement, {
+      taisoUrl: AVATAR_CONFIG.BVH_URL, // T キーで体操エモート
+    });
   } else {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -470,7 +472,8 @@ async function main() {
         model.rotation.y = AVATAR_CONFIG.ROTATION_Y;
         scene.add(model);
         avatarController.setModel(model);
-        console.log('[viewer] 操作アバター読込完了（WASD 移動 / マウスドラッグでカメラ）');
+        console.log('[viewer] 操作アバター読込完了（WASD 移動 / マウスでカメラ / T で体操）');
+        setStatus(`表示中: ${target.label}（WASD移動・マウスでカメラ・Tで体操）`);
       } else {
         // 体操モード: TaisoAvatar（BVH ループ再生・静止）。
         const a = new TaisoAvatar();
