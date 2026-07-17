@@ -12,6 +12,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import { TaisoAvatar } from './TaisoAvatar.js';
 import {
@@ -289,11 +290,15 @@ async function main() {
   scene.background = new THREE.Color(RENDER_CONFIG.BACKGROUND_COLOR);
 
   // ── ライト（splat は自己発光だが GLB アバターには光源が必要）──
+  // Avaturn 系 GLB は PBR マテリアルのため、環境マップ(IBL)が無いと黒くなる。
+  // RoomEnvironment を PMREM で環境マップ化して scene.environment に設定する。
   scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 1.0));
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
   dirLight.position.set(5, 10, 5);
   scene.add(dirLight);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
   const camera = new THREE.PerspectiveCamera(
     RENDER_CONFIG.CAMERA_FOV,
