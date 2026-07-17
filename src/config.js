@@ -67,18 +67,18 @@ export const SPARK_CONFIG = {
   MIN_SORT_INTERVAL_MS: 33,
 };
 
-// LOD 画質（検証システムの "medium" 相当＝画質と FPS のバランス）。
-// high(5M/0.5) は精細だが FPS が落ちるため medium に戻した。完成後に必要なら再調整。
-// - lodSplatCount: 常駐 splat 数（多いほど精細＝主コスト）
-// - lodRenderScale: 1未満で画面ピクセルあたり細かい LOD ノードを選ぶ
-// - maxStdDev: 各 splat の裾のクリップ
-// - blurAmount: アンチエイリアスの膨張（ほぼ無コスト）
-export const LOD_QUALITY = {
-  lodSplatCount: 2_500_000,
-  lodRenderScale: 1.0,
-  maxStdDev: 2.83,
-  blurAmount: 0.2,
+// LOD 画質プリセット（検証システム ~/Desktop/splats/viewer の QUALITY 準拠）。UI で切替可。
+// 画質を上げるほど精細だが FPS 低下＆ダウンロード量増（lodSplatCount が主コスト・DL量に直結）。
+// - lodSplatCount: 常駐 splat 数 / - lodRenderScale: 1未満で精細
+// - maxStdDev: splat の裾クリップ / - blurAmount: AA 膨張 / - pixelRatio: 描画解像度上限
+export const QUALITY_PRESETS = {
+  high:   { lodSplatCount: 5_000_000, lodRenderScale: 0.5, maxStdDev: 3.5,  blurAmount: 0.2,  pixelRatio: 2 },
+  medium: { lodSplatCount: 2_500_000, lodRenderScale: 1.0, maxStdDev: 2.83, blurAmount: 0.2,  pixelRatio: 1.5 },
+  low:    { lodSplatCount: 1_200_000, lodRenderScale: 1.0, maxStdDev: 2.83, blurAmount: 0.3,  pixelRatio: 1 },
+  vlow:   { lodSplatCount: 500_000,   lodRenderScale: 1.5, maxStdDev: 2.83, blurAmount: 0.35, pixelRatio: 1 },
 };
+export const QUALITY_LABELS = { high: '高（綺麗）', medium: '中（標準）', low: '低（軽い）', vlow: '最軽（最速）' };
+export const DEFAULT_QUALITY = 'medium';
 
 // ─────────────────────────────────────────────
 // 後続フェーズ用（現在は未使用）。メタバース本体と同一の WebSocket サーバーを共用する。

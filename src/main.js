@@ -23,10 +23,48 @@ import {
   RENDER_CONFIG,
   LOAD_TIMEOUT_MS,
   SPARK_CONFIG,
-  LOD_QUALITY,
+  QUALITY_PRESETS,
+  QUALITY_LABELS,
+  DEFAULT_QUALITY,
   AVATAR_CONFIG,
   AUDIO_CONFIG,
 } from './config.js';
+
+/** 画質プリセットを SparkRenderer / renderer に適用する（RAD/SPZ の LOD に効く）。 */
+function applyQuality(spark, renderer, name) {
+  const q = QUALITY_PRESETS[name] || QUALITY_PRESETS[DEFAULT_QUALITY];
+  spark.lodSplatCount = q.lodSplatCount;
+  spark.lodRenderScale = q.lodRenderScale;
+  spark.maxStdDev = q.maxStdDev;
+  spark.blurAmount = q.blurAmount;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if ('lodDirty' in spark) spark.lodDirty = true;
+  if (typeof spark.setDirty === 'function') spark.setDirty();
+}
+
+/** 画質切替のドロップダウン UI を作成し、変更時に applyQuality を呼ぶ。 */
+function createQualityUI(initial, onChange) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText =
+    'position:fixed;top:12px;right:12px;z-index:10;font:13px/1.4 system-ui,sans-serif;' +
+    'color:#cfd2ff;background:rgba(0,0,0,0.5);padding:6px 8px;border-radius:6px;';
+  const label = document.createElement('label');
+  label.textContent = '背景の画質 ';
+  const sel = document.createElement('select');
+  sel.style.cssText = 'font:inherit;color:#fff;background:#222;border:1px solid #555;border-radius:4px;padding:2px 4px;';
+  for (const key of Object.keys(QUALITY_PRESETS)) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = QUALITY_LABELS[key] || key;
+    if (key === initial) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => onChange(sel.value));
+  label.appendChild(sel);
+  wrap.appendChild(label);
+  document.body.appendChild(wrap);
+}
 
 /**
  * BGM コントローラを生成する。再生は T キー（体操開始）から制御する。
@@ -339,12 +377,10 @@ async function main() {
     preUpdate: SPARK_CONFIG.PRE_UPDATE,
     minSortIntervalMs: SPARK_CONFIG.MIN_SORT_INTERVAL_MS,
   });
-  // LOD 画質（RAD/SPZ のみ効く。生 PLY はツリー無で無効）。
-  spark.lodSplatCount = LOD_QUALITY.lodSplatCount;
-  spark.lodRenderScale = LOD_QUALITY.lodRenderScale;
-  spark.maxStdDev = LOD_QUALITY.maxStdDev;
-  spark.blurAmount = LOD_QUALITY.blurAmount;
   scene.add(spark);
+  // LOD 画質（RAD/SPZ のみ効く）。UI で切替可能。既定は DEFAULT_QUALITY。
+  applyQuality(spark, renderer, DEFAULT_QUALITY);
+  createQualityUI(DEFAULT_QUALITY, (name) => applyQuality(spark, renderer, name));
 
   // ── camera controls ──
   // 操作モードでは AvaturnController が三人称カメラを所有するため OrbitControls は使わない。
