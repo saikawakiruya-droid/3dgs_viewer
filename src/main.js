@@ -13,8 +13,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import { TaisoAvatar } from './TaisoAvatar.js';
+import { AvaturnController } from './avaturn-controller.js';
 import {
   MANIFEST_URL,
   ASSET_BASE,
@@ -324,13 +326,21 @@ async function main() {
   scene.add(spark);
 
   // ── camera controls ──
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
+  // 操作モードでは AvaturnController が三人称カメラを所有するため OrbitControls は使わない。
+  const controllable = AVATAR_CONFIG.ENABLED && AVATAR_CONFIG.CONTROLLABLE;
+  let controls = null;
+  let avatarController = null;
+  if (controllable) {
+    avatarController = new AvaturnController(camera, renderer.domElement, {});
+  } else {
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+  }
 
-  // ── 視点キャプチャ（開発補助）──
+  // ── 視点キャプチャ（開発補助・非操作モードのみ）──
   // V キーで現在のカメラを scenes.json の "camera": { pos, look } 形式で console 出力。
-  // 構図を手元で再現 → V → 出力値を該当シーンに貼るとその視点で起動する（検証システム方式）。
   window.addEventListener('keydown', (e) => {
+    if (!controls) return;
     if (e.key !== 'v' && e.key !== 'V') return;
     const r = (n) => Math.round(n * 1000) / 1000;
     const p = camera.position;
@@ -347,15 +357,16 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // ── アバター（ラジオ体操）──
+  // ── アバター（体操モード用の TaisoAvatar 参照）──
   let avatar = null;
 
   // ── render loop ──
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     const dt = clock.getDelta();
-    controls.update();
-    if (avatar) avatar.update(dt);
+    if (controls) controls.update();
+    if (avatarController) avatarController.update(dt); // 操作モード（移動＋カメラ追従＋アニメ）
+    else if (avatar) avatar.update(dt); // 体操モード
     renderer.render(scene, camera);
   });
 
@@ -407,12 +418,15 @@ async function main() {
     applyOrient(splat, orientOf(target)); // 向き（既定 rx=180 / per-scene orient）
     scene.add(splat);
     await loaded;
-    // カメラ: 手調整 camera{pos,look} を最優先 → 後方互換 viewpoint → bbox 自動枠取り。
-    if (
-      !applyCamera(target.camera, camera, controls) &&
-      !applyViewpoint(target.viewpoint, camera, controls)
-    ) {
-      await frameCameraToSplat(splat, camera, controls);
+    // カメラ: 操作モードは三人称カメラが所有するので枠取りしない。
+    // 非操作モードのみ 手調整 camera{pos,look} → viewpoint → bbox 自動枠取り。
+    if (controls) {
+      if (
+        !applyCamera(target.camera, camera, controls) &&
+        !applyViewpoint(target.viewpoint, camera, controls)
+      ) {
+        await frameCameraToSplat(splat, camera, controls);
+      }
     }
     setStatus(`表示中: ${target.label}`);
   } catch (e) {
@@ -420,22 +434,35 @@ async function main() {
     setStatus(`読込失敗: ${target.label}（${e.message}）`);
   }
 
-  // ── ラジオ体操アバター（splat とは独立して読込・配置）──
+  // ── アバター読込 ──
   if (AVATAR_CONFIG.ENABLED) {
+    const pos = AVATAR_CONFIG.POSITION;
     try {
-      const a = new TaisoAvatar();
-      const pos = AVATAR_CONFIG.POSITION;
-      await a.load({
-        modelUrl: AVATAR_CONFIG.MODEL_URL,
-        bvhUrl: AVATAR_CONFIG.BVH_URL,
-        position: new THREE.Vector3(pos.x, pos.y, pos.z),
-        rotationY: AVATAR_CONFIG.ROTATION_Y,
-        scale: AVATAR_CONFIG.SCALE,
-        loop: AVATAR_CONFIG.LOOP,
-      });
-      scene.add(a.model);
-      avatar = a;
-      console.log('[viewer] アバター読込完了（矢印/[ ]/, ./B で調整）');
+      if (controllable) {
+        // 操作モード: GLB を読込 → AvaturnController に渡す（idle/walk セットアップ＋カメラ追従）。
+        const gltf = await new GLTFLoader().loadAsync(AVATAR_CONFIG.MODEL_URL);
+        const model = gltf.scene;
+        model.scale.setScalar(AVATAR_CONFIG.SCALE);
+        model.position.set(pos.x, pos.y, pos.z);
+        model.rotation.y = AVATAR_CONFIG.ROTATION_Y;
+        scene.add(model);
+        avatarController.setModel(model);
+        console.log('[viewer] 操作アバター読込完了（WASD 移動 / マウスドラッグでカメラ）');
+      } else {
+        // 体操モード: TaisoAvatar（BVH ループ再生・静止）。
+        const a = new TaisoAvatar();
+        await a.load({
+          modelUrl: AVATAR_CONFIG.MODEL_URL,
+          bvhUrl: AVATAR_CONFIG.BVH_URL,
+          position: new THREE.Vector3(pos.x, pos.y, pos.z),
+          rotationY: AVATAR_CONFIG.ROTATION_Y,
+          scale: AVATAR_CONFIG.SCALE,
+          loop: AVATAR_CONFIG.LOOP,
+        });
+        scene.add(a.model);
+        avatar = a;
+        console.log('[viewer] 体操アバター読込完了（矢印/[ ]/, ./B で調整）');
+      }
     } catch (e) {
       console.error('[viewer] アバター読込失敗:', e);
     }

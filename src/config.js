@@ -35,9 +35,12 @@ export const LOAD_TIMEOUT_MS = 60_000;
 // ─────────────────────────────────────────────
 export const AVATAR_CONFIG = {
   ENABLED: true,
+  // true: 操作モード（AvaturnController = WASD移動 + 三人称カメラ + idle/walk）。
+  // false: 体操モード（TaisoAvatar = neccos_taiso.bvh をループ再生・静止）+ OrbitControls。
+  CONTROLLABLE: true,
   MODEL_URL: `${import.meta.env.BASE_URL}model.glb`,
   BVH_URL: `${import.meta.env.BASE_URL}neccos_taiso.bvh`,
-  POSITION: { x: 2, y: 0, z: -1 }, // 初期配置（look-at 付近）。要調整
+  POSITION: { x: 2, y: 0, z: -1 }, // 初期配置（要調整）
   ROTATION_Y: 0,
   SCALE: 1,
   LOOP: true,
