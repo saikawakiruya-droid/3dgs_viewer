@@ -49,7 +49,11 @@ async function resolveSplatUrl() {
     scenes.find((s) => s.id === wantId) || scenes[0] || null;
 
   if (!entry) return null;
-  return { url: resolveAssetUrl(entry.url), label: entry.name || entry.id };
+  return {
+    url: resolveAssetUrl(entry.url),
+    label: entry.name || entry.id,
+    viewpoint: entry.viewpoint, // 任意: 保存済み開始視点（scenes.json）。無ければ自動枠取り。
+  };
 }
 
 /** SplatMesh の読込完了を待つ（spark v2.x は onFinishedLoading）。60s タイムアウト付き。 */
@@ -153,6 +157,31 @@ async function computeSplatWorldBox(splat) {
   }
 }
 
+/** x/y/z すべて有限数の Vec3 か。 */
+function isVec3(v) {
+  return (
+    v != null &&
+    typeof v === 'object' &&
+    ['x', 'y', 'z'].every((k) => typeof v[k] === 'number' && Number.isFinite(v[k]))
+  );
+}
+
+/**
+ * 保存済み開始視点（scenes.json の viewpoint）を適用する。
+ * position/target は必須、fov/near/far は任意。適用したら true、不正・未指定なら false。
+ */
+function applyViewpoint(vp, camera, controls) {
+  if (!vp || !isVec3(vp.position) || !isVec3(vp.target)) return false;
+  camera.position.set(vp.position.x, vp.position.y, vp.position.z);
+  if (typeof vp.fov === 'number') camera.fov = vp.fov;
+  if (typeof vp.near === 'number') camera.near = vp.near;
+  if (typeof vp.far === 'number') camera.far = vp.far;
+  camera.updateProjectionMatrix();
+  controls.target.set(vp.target.x, vp.target.y, vp.target.z);
+  controls.update();
+  return true;
+}
+
 /** splat の bounding box からカメラ位置・注視点・クリップ面を自動調整する。 */
 async function frameCameraToSplat(splat, camera, controls) {
   const box = await computeSplatWorldBox(splat);
@@ -207,6 +236,23 @@ async function main() {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
+  // ── 視点キャプチャ（開発補助）──
+  // V キーで現在のカメラ視点を scenes.json の "viewpoint" へ貼り付けられる形で console 出力。
+  // Spark で決めた構図を手元で再現 → V → 出力値を該当シーンに貼るとその視点で起動する。
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'v' && e.key !== 'V') return;
+    const r = (n) => Math.round(n * 1000) / 1000;
+    const p = camera.position;
+    const t = controls.target;
+    const vp = {
+      position: { x: r(p.x), y: r(p.y), z: r(p.z) },
+      target: { x: r(t.x), y: r(t.y), z: r(t.z) },
+      fov: camera.fov,
+    };
+    console.log('[viewer] 現在の視点（scenes.json の "viewpoint" に貼り付け）:\n' + JSON.stringify(vp, null, 2));
+    setStatus('視点をコンソールに出力しました（V キー）');
+  });
+
   // ── resize ──
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -233,7 +279,10 @@ async function main() {
     await waitForLoad(splat);
     scene.add(splat);
     orientSplat(splat); // 上下補正（X軸180°）
-    await frameCameraToSplat(splat, camera, controls); // bbox からカメラ自動枠取り
+    // 保存済み開始視点があればそれを優先。無ければ bbox から自動枠取り。
+    if (!applyViewpoint(target.viewpoint, camera, controls)) {
+      await frameCameraToSplat(splat, camera, controls);
+    }
     setStatus(`表示中: ${target.label}`);
   } catch (e) {
     console.error('[viewer] splat 読込失敗:', e);

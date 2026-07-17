@@ -1,5 +1,6 @@
 {
   "_note": "url は MetaVarsee と同一サーバー上の splat 配信パス（相対）。配信ベースは VITE_ASSET_BASE で前置。絶対URL(http…)を直接書いてもよい。ローカルにアセットは置かない。",
+  "_viewpoint": "任意: 各シーンに \"viewpoint\": { position:{x,y,z}, target:{x,y,z}, fov? } を付けると起動時にその開始視点になる。無ければ bbox から自動枠取り。ビューアで V キーを押すと現在視点が貼り付け用に console 出力される。",
   "default": "space-spz",
   "scenes": [
     { "id": "space-spz", "name": "Space (SPZ, 軽量)", "url": "spz/scene.spz" },
