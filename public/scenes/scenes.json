@@ -1,14 +1,18 @@
 {
   "_note": "url は splat アセットの配信パス（相対）。配信ベースは VITE_ASSET_BASE で前置。絶対URL(http…)を直接書いてもよい。RAD(.rad)/SPZ(.spz) は LOD、生 PLY は LOD 無。",
   "_camera": "任意: \"camera\": { \"pos\": [x,y,z], \"look\": [x,y,z] } で起動時の手調整視点。無ければ bbox 自動枠取り。V キーで現在カメラを貼り付け用に console 出力。",
-  "_orient": "任意: \"orient\": { \"rx\": 度, \"ry\": 度, \"rz\": 度 }。無指定は既定 rx=180（-Y-up の 3DGS を上向きに）。点群等は rx:90 など。",
-  "default": "shrine-clean",
+  "_orient": "任意: \"orient\": { \"rx\": 度, \"ry\": 度, \"rz\": 度 }。無指定は既定 rx=180（-Y-up の 3DGS を上向きに）。点群等は個別に調整。",
+  "default": "shibuya-sq",
   "scenes": [
     {
-      "id": "shrine-clean",
-      "name": "shrine_clean (SH3, RAD-LOD)",
-      "url": "shrine_clean-lod.rad",
-      "camera": { "pos": [-6, 3.2, 6], "look": [2, 3.0, -1] }
+      "id": "shibuya-sq",
+      "name": "ShibuyaSQ (RAD-LOD)",
+      "url": "ShibuyaSQ_point_cloud-lod.rad",
+      "camera": {
+        "pos": [-5.774043499818035, 2.4702122934861954, 14.678533547405841],
+        "look": [-9.072194136552714, 2.5261281063004097, 10.920997679408842]
+      },
+      "orient": { "rx": -85, "ry": 0, "rz": -20 }
     }
   ]
 }
