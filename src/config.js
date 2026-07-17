@@ -40,11 +40,15 @@ export const SPARK_CONFIG = {
   MIN_SORT_INTERVAL_MS: 33,
 };
 
-// LOD 画質（検証システムの "medium" 相当）。lodSplatCount が常駐 splat 数＝主コスト。
+// LOD 画質（検証システムの "high" 相当＝最高画質）。
+// - lodSplatCount: 常駐 splat 数（多いほど精細＝主コスト）
+// - lodRenderScale: 1未満で画面ピクセルあたり細かい LOD ノードを選ぶ（0.5=高精細）
+// - maxStdDev: 各 splat の裾のクリップ（大きいほど splat を大きく残す）
+// - blurAmount: アンチエイリアスの膨張（ほぼ無コスト）
 export const LOD_QUALITY = {
-  lodSplatCount: 2_500_000,
-  lodRenderScale: 1.0,
-  maxStdDev: 2.83,
+  lodSplatCount: 5_000_000,
+  lodRenderScale: 0.5,
+  maxStdDev: 3.5,
   blurAmount: 0.2,
 };
 
