@@ -1,0 +1,7 @@
+{
+  "default": "shrine-web",
+  "scenes": [
+    { "id": "shrine-web", "name": "Shrine (PLY, 軽量)", "url": "/scenes/shrine_web.ply" },
+    { "id": "room", "name": "Room (SPZ)", "url": "/scenes/room.spz" }
+  ]
+}
