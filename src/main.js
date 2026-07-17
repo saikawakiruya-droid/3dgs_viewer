@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+import { TaisoAvatar } from './TaisoAvatar.js';
 import {
   MANIFEST_URL,
   ASSET_BASE,
@@ -20,6 +21,7 @@ import {
   LOAD_TIMEOUT_MS,
   SPARK_CONFIG,
   LOD_QUALITY,
+  AVATAR_CONFIG,
 } from './config.js';
 
 const DEG = Math.PI / 180;
@@ -286,6 +288,13 @@ async function main() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(RENDER_CONFIG.BACKGROUND_COLOR);
 
+  // ── ライト（splat は自己発光だが GLB アバターには光源が必要）──
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 1.0));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
+  dirLight.position.set(5, 10, 5);
+  scene.add(dirLight);
+
   const camera = new THREE.PerspectiveCamera(
     RENDER_CONFIG.CAMERA_FOV,
     window.innerWidth / window.innerHeight,
@@ -333,10 +342,50 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // ── アバター（ラジオ体操）──
+  let avatar = null;
+
   // ── render loop ──
+  const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
+    const dt = clock.getDelta();
     controls.update();
+    if (avatar) avatar.update(dt);
     renderer.render(scene, camera);
+  });
+
+  // ── アバター配置調整（開発補助）──
+  // 矢印: X/Z 移動 / PageUp・Down: Y 移動 / [ ]: スケール / , .: Y回転 / B: 現在値を出力。
+  window.addEventListener('keydown', (e) => {
+    if (!avatar || !avatar.model) return;
+    const m = avatar.model;
+    const step = e.shiftKey ? 0.5 : 0.1;
+    let handled = true;
+    switch (e.key) {
+      case 'ArrowUp': m.position.z -= step; break;
+      case 'ArrowDown': m.position.z += step; break;
+      case 'ArrowLeft': m.position.x -= step; break;
+      case 'ArrowRight': m.position.x += step; break;
+      case 'PageUp': m.position.y += step; break;
+      case 'PageDown': m.position.y -= step; break;
+      case '[': m.scale.multiplyScalar(0.9); break;
+      case ']': m.scale.multiplyScalar(1.1); break;
+      case ',': m.rotation.y -= 0.1; break;
+      case '.': m.rotation.y += 0.1; break;
+      case 'b': case 'B': {
+        const r = (n) => Math.round(n * 1000) / 1000;
+        const t = {
+          POSITION: { x: r(m.position.x), y: r(m.position.y), z: r(m.position.z) },
+          ROTATION_Y: r(m.rotation.y),
+          SCALE: r(m.scale.x),
+        };
+        console.log('[viewer] アバター transform（config.js AVATAR_CONFIG へ）:\n' + JSON.stringify(t, null, 2));
+        setStatus('アバター transform をコンソールに出力（B キー）');
+        break;
+      }
+      default: handled = false;
+    }
+    if (handled) e.preventDefault();
   });
 
   // ── splat load（リンク駆動）──
@@ -364,6 +413,27 @@ async function main() {
   } catch (e) {
     console.error('[viewer] splat 読込失敗:', e);
     setStatus(`読込失敗: ${target.label}（${e.message}）`);
+  }
+
+  // ── ラジオ体操アバター（splat とは独立して読込・配置）──
+  if (AVATAR_CONFIG.ENABLED) {
+    try {
+      const a = new TaisoAvatar();
+      const pos = AVATAR_CONFIG.POSITION;
+      await a.load({
+        modelUrl: AVATAR_CONFIG.MODEL_URL,
+        bvhUrl: AVATAR_CONFIG.BVH_URL,
+        position: new THREE.Vector3(pos.x, pos.y, pos.z),
+        rotationY: AVATAR_CONFIG.ROTATION_Y,
+        scale: AVATAR_CONFIG.SCALE,
+        loop: AVATAR_CONFIG.LOOP,
+      });
+      scene.add(a.model);
+      avatar = a;
+      console.log('[viewer] アバター読込完了（矢印/[ ]/, ./B で調整）');
+    } catch (e) {
+      console.error('[viewer] アバター読込失敗:', e);
+    }
   }
 }
 

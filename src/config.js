@@ -30,6 +30,20 @@ export const RENDER_CONFIG = {
 export const LOAD_TIMEOUT_MS = 60_000;
 
 // ─────────────────────────────────────────────
+// ラジオ体操アバター（GLB + BVH）。ビューアに同梱（同一オリジン、R2 ではない）。
+// 位置/スケール/回転は splat シーンに合わせて目視調整する（B キーで現在値を console 出力）。
+// ─────────────────────────────────────────────
+export const AVATAR_CONFIG = {
+  ENABLED: true,
+  MODEL_URL: `${import.meta.env.BASE_URL}model.glb`,
+  BVH_URL: `${import.meta.env.BASE_URL}neccos_taiso.bvh`,
+  POSITION: { x: 2, y: 0, z: -1 }, // 初期配置（look-at 付近）。要調整
+  ROTATION_Y: 0,
+  SCALE: 1,
+  LOOP: true,
+};
+
+// ─────────────────────────────────────────────
 // Spark LOD / 画質設定（検証システム ~/Desktop/splats/viewer の実績値に準拠）。
 // RAD/SPZ は LOD ツリーを持つため lodSplatCount 等が効く。生 PLY は LOD 無で無効。
 // - preUpdate:false … LOD 再walk/再ソートを描画パスから外しカメラ移動を滑らかに。
