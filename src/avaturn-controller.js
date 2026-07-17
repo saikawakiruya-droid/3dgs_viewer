@@ -129,10 +129,16 @@ export class AvaturnController extends BaseAvatarController {
     if (event.key === 't' || event.key === 'T') this.toggleTaiso();
   }
 
+  /** 体操 BVH の長さ（秒）。 */
+  _taisoDuration() {
+    return this.taisoAction?.getClip()?.duration || 0;
+  }
+
   /**
-   * 体操エモートの開始/停止（音楽と同期）。
-   * - 音楽が止まっている: 音楽を頭から再生 ＋ 体操を頭から（シンクロ）。
-   * - 音楽が流れている: 体操を音楽の再生位置に合わせて開始（続きから）。
+   * 体操エモートの開始/停止（音楽と 1:1 同期）。曲と体操はほぼ同尺なので、
+   * 体操の再生位置は「音楽の再生位置」に毎フレームロックする（updateAnimation）。
+   * - 音楽が止まっている: 音楽を頭から再生（→ 体操も頭から）。
+   * - 音楽が流れている: 体操は現在の音楽位置から（＝ずっと踊っていた場合の進捗）。
    * - 停止時: 体操をやめて idle へ（音楽は流したまま）。
    */
   toggleTaiso() {
@@ -140,6 +146,7 @@ export class AvaturnController extends BaseAvatarController {
     this._emoting = !this._emoting;
 
     if (!this._emoting) {
+      this.taisoAction.setEffectiveTimeScale(1); // 通常再生に戻す
       this.taisoAction.fadeOut(0.2);
       this.transitionToState(LocomotionState.IDLE);
       return;
@@ -148,30 +155,32 @@ export class AvaturnController extends BaseAvatarController {
     const cur = this.getActionForState(this.currentState);
     if (cur) cur.fadeOut(0.2);
 
-    // 音楽と同期して開始位置を決める。
-    const dur = this.taisoAction.getClip()?.duration || 0;
-    let startTime = 0;
-    if (this.music) {
-      if (this.music.isPlaying()) {
-        startTime = dur > 0 ? this.music.time() % dur : 0; // 続きから
-      } else {
-        this.music.playFromStart(); // 音楽を頭から
-        startTime = 0;
-      }
-    }
+    if (this.music && !this.music.isPlaying()) this.music.playFromStart();
+
+    const dur = this._taisoDuration();
+    const startTime = this.music && dur > 0 ? this.music.time() % dur : 0;
 
     this.taisoAction.reset();
     this.taisoAction.time = startTime;
+    // 時間は音楽から駆動する（mixer では進めない＝毎フレーム music に一致させる）。
+    this.taisoAction.setEffectiveTimeScale(0);
     this.taisoAction.fadeIn(0.2).play();
   }
 
-  /** 体操中は locomotion 遷移を止める。移動入力があれば体操を解除して歩行へ。 */
+  /** 体操中は再生位置を音楽にロックし、locomotion 遷移は止める。移動入力で歩行へ。 */
   updateAnimation(deltaTime) {
     if (this._emoting) {
+      // 体操の再生位置を音楽の再生位置に同期（timeScale=0 なので mixer は進めない）。
+      const dur = this._taisoDuration();
+      if (this.music && this.music.isPlaying() && dur > 0) {
+        this.taisoAction.time = this.music.time() % dur;
+      }
       if (this.mixer) this.mixer.update(deltaTime);
+
       const wantsToMove = this.keys.w || this.keys.a || this.keys.s || this.keys.d;
       if (wantsToMove) {
         this._emoting = false;
+        this.taisoAction.setEffectiveTimeScale(1);
         this.taisoAction.fadeOut(0.2);
         this.transitionToState(LocomotionState.WALK);
       }
