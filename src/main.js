@@ -43,6 +43,38 @@ function applyQuality(spark, renderer, name) {
   if (typeof spark.setDirty === 'function') spark.setDirty();
 }
 
+/** FPS / メモリ / LOD 常駐 splat 数を表示する軽量パネルを作る。tick() を毎フレーム呼ぶ。 */
+function createStatsUI(spark) {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;top:12px;left:12px;z-index:10;font:12px/1.5 ui-monospace,SFMono-Regular,monospace;' +
+    'color:#9effa0;background:rgba(0,0,0,0.5);padding:4px 8px;border-radius:6px;pointer-events:none;white-space:pre;';
+  document.body.appendChild(el);
+  let frames = 0;
+  let last = performance.now();
+  return {
+    tick() {
+      frames++;
+      const now = performance.now();
+      if (now - last >= 500) {
+        const fps = Math.round((frames * 1000) / (now - last));
+        frames = 0;
+        last = now;
+        const parts = [`FPS ${fps}`];
+        // JS ヒープ使用量（Chrome 系のみ）。
+        if (performance.memory && performance.memory.usedJSHeapSize) {
+          parts.push(`Mem ${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)}MB`);
+        }
+        // LOD 常駐 splat 数（画質設定に連動＝読み込み規模の目安）。
+        if (spark && typeof spark.lodSplatCount === 'number') {
+          parts.push(`Splats ${(spark.lodSplatCount / 1e6).toFixed(1)}M`);
+        }
+        el.textContent = parts.join('  |  ');
+      }
+    },
+  };
+}
+
 /** 画質切替のドロップダウン UI を作成し、変更時に applyQuality を呼ぶ。 */
 function createQualityUI(initial, onChange) {
   const wrap = document.createElement('div');
@@ -381,6 +413,7 @@ async function main() {
   // LOD 画質（RAD/SPZ のみ効く）。UI で切替可能。既定は DEFAULT_QUALITY。
   applyQuality(spark, renderer, DEFAULT_QUALITY);
   createQualityUI(DEFAULT_QUALITY, (name) => applyQuality(spark, renderer, name));
+  const stats = createStatsUI(spark); // FPS / メモリ / splat 数
 
   // ── camera controls ──
   // 操作モードでは AvaturnController が三人称カメラを所有するため OrbitControls は使わない。
@@ -428,6 +461,7 @@ async function main() {
     if (avatarController) avatarController.update(dt); // 操作モード（移動＋カメラ追従＋アニメ）
     else if (avatar) avatar.update(dt); // 体操モード
     renderer.render(scene, camera);
+    stats.tick();
   });
 
   // ── アバター配置調整（開発補助）──
