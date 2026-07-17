@@ -25,7 +25,29 @@ import {
   SPARK_CONFIG,
   LOD_QUALITY,
   AVATAR_CONFIG,
+  AUDIO_CONFIG,
 } from './config.js';
+
+/** BGM をセットアップ。autoplay 制限のため、初回のユーザー操作（クリック/キー）で再生開始する。 */
+function setupAudio() {
+  if (!AUDIO_CONFIG.ENABLED) return;
+  const audio = new Audio(AUDIO_CONFIG.URL);
+  audio.loop = AUDIO_CONFIG.LOOP;
+  audio.volume = AUDIO_CONFIG.VOLUME;
+  let started = false;
+  const start = () => {
+    if (started) return;
+    audio.play().then(() => {
+      started = true;
+      window.removeEventListener('pointerdown', start);
+      window.removeEventListener('keydown', start);
+    }).catch(() => { /* まだ操作前など。次の操作で再試行 */ });
+  };
+  // 自動再生を試み、ブロックされたら初回操作で開始。
+  start();
+  window.addEventListener('pointerdown', start);
+  window.addEventListener('keydown', start);
+}
 
 const DEG = Math.PI / 180;
 
@@ -280,6 +302,7 @@ async function frameCameraToSplat(splat, camera, controls) {
 
 async function main() {
   const container = document.getElementById('canvas-container');
+  setupAudio(); // BGM（初回操作で再生）
 
   // ── renderer ──
   const renderer = new THREE.WebGLRenderer({ antialias: true });

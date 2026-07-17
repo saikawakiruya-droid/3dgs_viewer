@@ -30,6 +30,16 @@ export const RENDER_CONFIG = {
 export const LOAD_TIMEOUT_MS = 60_000;
 
 // ─────────────────────────────────────────────
+// BGM（ラジオ体操の曲）。ビューアに同梱。ブラウザの autoplay 制限のため初回操作で再生。
+// ─────────────────────────────────────────────
+export const AUDIO_CONFIG = {
+  ENABLED: true,
+  URL: `${import.meta.env.BASE_URL}audio/taiso.mp3`,
+  LOOP: true,
+  VOLUME: 0.7,
+};
+
+// ─────────────────────────────────────────────
 // ラジオ体操アバター（GLB + BVH）。ビューアに同梱（同一オリジン、R2 ではない）。
 // 位置/スケール/回転は splat シーンに合わせて目視調整する（B キーで現在値を console 出力）。
 // ─────────────────────────────────────────────
