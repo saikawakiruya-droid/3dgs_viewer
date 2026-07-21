@@ -8,7 +8,8 @@
       "id": "shrine-light",
       "name": "shrine_light (RAD-LOD)",
       "url": "shrine_light-lod.rad",
-      "camera": { "pos": [-6, 3.2, 6], "look": [2, 3.0, -1] }
+      "camera": { "pos": [-6, 3.2, 6], "look": [2, 3.0, -1] },
+      "orient": { "rx": 182.578, "ry": 0, "rz": 0 }
     }
   ]
 }

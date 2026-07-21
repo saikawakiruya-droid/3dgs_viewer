@@ -50,7 +50,7 @@ export const AVATAR_CONFIG = {
   CONTROLLABLE: true,
   MODEL_URL: `${import.meta.env.BASE_URL}model.glb`,
   BVH_URL: `${import.meta.env.BASE_URL}neccos_taiso.bvh`,
-  POSITION: { x: 2, y: 0.3, z: -1 }, // 初期配置。y=床高（足の埋まり調整。PageUp/Downで微調整可）
+  POSITION: { x: 2, y: 0.6, z: -1 }, // 初期配置。y=床高（床の傾き補正 orient rx=182.578 と対で接地）
   ROTATION_Y: 0,
   SCALE: 1,
   LOOP: true,
