@@ -17,6 +17,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import { TaisoAvatar } from './TaisoAvatar.js';
 import { AvaturnController } from './avaturn-controller.js';
+import { createAdminPanel } from './admin-panel.js';
 import {
   MANIFEST_URL,
   ASSET_BASE,
@@ -160,7 +161,7 @@ async function resolveSplatUrl() {
 
   // 1) ?url= 直接指定が最優先（リモート絶対 URL をそのまま渡せる）。
   const direct = params.get('url');
-  if (direct) return { url: resolveAssetUrl(direct), label: direct };
+  if (direct) return { id: 'direct', url: resolveAssetUrl(direct), label: direct };
 
   // 2) scenes.json を取得して ?scene=<id> / default を解決。
   let manifest = { scenes: [], default: null };
@@ -178,8 +179,11 @@ async function resolveSplatUrl() {
 
   if (!entry) return null;
   return {
+    id: entry.id || wantId || 'default', // 管理者モードの保存キー
     url: resolveAssetUrl(entry.url),
     label: entry.name || entry.id,
+    position: entry.position, // 任意: [x,y,z]（管理者モードで調整した値）
+    scale: entry.scale,       // 任意: 数値
     camera: entry.camera, // 任意: 手調整カメラ { pos:[x,y,z], look:[x,y,z] }（検証システム方式）
     orient: entry.orient, // 任意: 向き { rx, ry, rz }（度）。無指定は既定 rx=180。
     viewpoint: entry.viewpoint, // 後方互換: { position, target, fov? }。camera が無い場合に使用。
@@ -256,6 +260,21 @@ function applyOrient(splat, o) {
 /** 有限数 3 要素の配列 [x,y,z] か。 */
 function isVec3Arr(a) {
   return Array.isArray(a) && a.length === 3 && a.every((n) => typeof n === 'number' && Number.isFinite(n));
+}
+
+/**
+ * シーンの位置・スケールを splat に適用する（管理者モードの位置合わせ値を往復させる）。
+ * scenes.json の "position": [x,y,z] / "scale": n（いずれも任意）。
+ */
+function applyTransform(splat, entry) {
+  if (!entry) return;
+  if (isVec3Arr(entry.position) && splat.position && typeof splat.position.set === 'function') {
+    splat.position.set(entry.position[0], entry.position[1], entry.position[2]);
+  }
+  if (typeof entry.scale === 'number' && Number.isFinite(entry.scale) && entry.scale > 0) {
+    splat.scale.set(entry.scale, entry.scale, entry.scale);
+  }
+  if (typeof splat.updateMatrixWorld === 'function') splat.updateMatrixWorld(true);
 }
 
 /**
@@ -511,9 +530,12 @@ async function main() {
   const container = document.getElementById('canvas-container');
   const music = setupAudio(); // BGM（T キー＝体操開始で再生制御）
 
-  // 開発補助（床測定パネル・グリッド・調整キー等）は ?debug=1 のときだけ有効化。
+  // 開発補助（床測定パネル・グリッド・調整キー等）は ?debug=1 / ?admin=1 で有効化。
   // 通常アクセス（本番）では一切表示・反応しない。
-  const DEBUG = new URLSearchParams(location.search).has('debug');
+  // ?admin=1 は上記に加えて「管理者モードパネル」（位置合わせ・視点保存・診断）を表示する。
+  const _params = new URLSearchParams(location.search);
+  const ADMIN = _params.has('admin');
+  const DEBUG = _params.has('debug') || ADMIN;
 
   // ── renderer ──
   // FPS チューニング（中品質の見た目は保ったまま GPU コストのみ削減）:
@@ -545,6 +567,30 @@ async function main() {
   scene.add(dirLight);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+  // ── 接地影（ブロブシャドウ）──
+  // splat 床は通常の影を受けないため、アバター足元に柔らかい楕円影を敷いて接地感を出す。
+  // 太陽方向に依存せず常に自然。groundY（床面）に追従する。
+  const shadowMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { uStrength: { value: 0.38 } },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      varying vec2 vUv; uniform float uStrength;
+      void main() {
+        float d = distance(vUv, vec2(0.5)) * 2.0;        // 0=中心, 1=外周
+        float a = (1.0 - smoothstep(0.0, 1.0, d)) * uStrength; // 中心濃く外周へフェード
+        if (a < 0.003) discard;
+        gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+      }`,
+  });
+  const blobShadow = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), shadowMat);
+  blobShadow.rotation.x = -Math.PI / 2;
+  blobShadow.renderOrder = 2; // グリッド(1)より前・床splatの上に描く
+  scene.add(blobShadow);
 
   // ── 歩行面グリッド（位置関係の可視化・追従＋距離フェード）──
   // 問題点の対処: 巨大な一枚グリッドは遠方が地平線方向へ伸び、深度を書かない splat の
@@ -680,6 +726,9 @@ async function main() {
   let avatar = null;
   let ctrlModel = null; // 操作モードの GLB（床高調整で参照）
   let loadedSplat = null; // 読込済み SplatMesh（床傾き診断 F キーで参照）
+  // 管理者モードパネル。実体は target 解決後に生成する（キーハンドラより先に宣言して
+  // 読込中のキー入力が TDZ に触れないようにする）。
+  let adminPanel = null;
 
   // ── 床高調整 & グリッド表示（操作モードの位置合わせ補助）──
   // PageUp/PageDown: 歩行面（アバター＋グリッド）を同時に上下。Shift で粗調整。
@@ -795,6 +844,7 @@ async function main() {
     if (ctrlModel) ctrlModel.position.y = groundY;
     if (avatar && avatar.model) avatar.model.position.y = groundY;
     showMeasure(); // 画面左下の数値を更新
+    if (adminPanel) adminPanel.sync(); // 管理者パネルの数値入力を追従させる
     // gridPlane の y は描画ループで groundY に追従。
   });
 
@@ -810,8 +860,11 @@ async function main() {
     if (follow) {
       gridPlane.position.set(follow.position.x, groundY, follow.position.z);
       gridMat.uniforms.uCenter.value.copy(follow.position);
+      // 接地影をアバター足元へ（床面のわずか上で z-fight 回避）。
+      blobShadow.position.set(follow.position.x, groundY + 0.01, follow.position.z);
     } else {
       gridPlane.position.y = groundY;
+      blobShadow.position.y = groundY + 0.01;
     }
     // サイドビュー: コントローラのカメラ更新後に上書きし、足元を真横から見る。
     if (sideView && follow) {
@@ -865,14 +918,52 @@ async function main() {
     return;
   }
 
+  // ── 管理者モードパネル（?admin=1）──
+  // 位置合わせ・視点保存・診断をパネル UI で操作する。キー操作も従来どおり併用可。
+  if (ADMIN) {
+    adminPanel = createAdminPanel({
+      sceneId: target.id,
+      camera,
+      getSplat: () => loadedSplat,
+      getControls: () => controls,
+      getGroundY: () => groundY,
+      setGroundY: (v) => {
+        groundY = v;
+        if (ctrlModel) ctrlModel.position.y = groundY;
+        if (avatar && avatar.model) avatar.model.position.y = groundY;
+        showMeasure();
+      },
+      getGridTilt: () => ({ x: gridTiltX, z: gridTiltZ }),
+      setGridTilt: (x, z) => {
+        gridTiltX = x;
+        gridTiltZ = z;
+        applyGridRotation();
+      },
+      isGridVisible: () => gridPlane.visible,
+      setGridVisible: (b) => { gridPlane.visible = b; },
+      isSideView: () => sideView,
+      setSideView: (b) => { sideView = b; if (b) gridPlane.visible = true; },
+      toggleStochastic: () => {
+        const v = spark.defaultView;
+        v.stochastic = !v.stochastic;
+        return v.stochastic;
+      },
+      analyzeFloor: () => analyzeFloor(loadedSplat),
+      setStatus,
+    });
+  }
+
   setStatus(`読込中: ${target.label} …`);
   try {
     // LOD 対応でロード。mesh は先に scene へ add（RAD/SPZ は add 後に段階ストリーム）。
     const { mesh: splat, loaded } = loadSplatMesh(target.url);
     applyOrient(splat, orientOf(target)); // 向き（既定 rx=180 / per-scene orient）
+    applyTransform(splat, target);        // 位置・スケール（任意・管理者モードの調整値）
     scene.add(splat);
     await loaded;
     loadedSplat = splat; // 床傾き診断（F キー）用に参照を保持
+    // 管理者モード: splat 読込後に保存済みの位置合わせを復元する。
+    if (adminPanel) adminPanel.restoreSaved();
     // カメラ: 操作モードは三人称カメラが所有するので枠取りしない。
     // 非操作モードのみ 手調整 camera{pos,look} → viewpoint → bbox 自動枠取り。
     if (controls) {
