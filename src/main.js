@@ -77,6 +77,17 @@ function createStatsUI(spark) {
   };
 }
 
+/** 床測定の数値を画面左下に常時表示するパネル（DevTools 不要）。set(text) で更新。 */
+function createMeasureUI() {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;left:12px;bottom:12px;z-index:11;font:13px/1.6 ui-monospace,SFMono-Regular,monospace;' +
+    'color:#ffe08a;background:rgba(0,0,0,0.65);padding:8px 12px;border-radius:8px;white-space:pre;max-width:70vw;';
+  el.textContent = '床測定  R/C=高さ  1=A地点  2=B地点';
+  document.body.appendChild(el);
+  return { set: (t) => { el.textContent = t; } };
+}
+
 /** 画質切替のドロップダウン UI を作成し、変更時に applyQuality を呼ぶ。 */
 function createQualityUI(initial, onChange) {
   const wrap = document.createElement('div');
@@ -539,6 +550,17 @@ async function main() {
   let gridTiltX = 0; // 前後の傾き（rad）。傾いた splat 床に合わせる。
   let gridTiltZ = 0; // 左右の傾き（rad）。
   let markA = null;  // 2点接地法の A 地点 { x, z, y }
+  let sideView = false; // 足元を真横から見る接地確認ビュー（P キー）
+  let lastResult = '';  // 2点法の最新結果（画面表示用）
+  const measure = createMeasureUI();
+  const rr = (n) => Math.round(n * 1000) / 1000;
+  // 画面左下パネルを現在値で更新（床高・A地点・最新結果）。
+  const showMeasure = () => {
+    let t = `床高(現在) y=${rr(groundY)}`;
+    if (markA) t += `\nA: x=${rr(markA.x)} z=${rr(markA.z)} y=${rr(markA.y)}`;
+    if (lastResult) t += `\n${lastResult}`;
+    measure.set(t);
+  };
   const GRID_RADIUS = 9; // これを超えると完全に消える（社殿まで届かない）
   const gridMat = new THREE.ShaderMaterial({
     transparent: true,
@@ -665,6 +687,14 @@ async function main() {
       case 'j': case 'J': gridTiltZ += tstep; rot = true; break;
       case 'l': case 'L': gridTiltZ -= tstep; rot = true; break;
       case 'g': case 'G': gridPlane.visible = !gridPlane.visible; break;
+      // 接地確認: 足元を真横から見るサイドビュー。グリッド線(=足の高さ)も同時表示。
+      // 横から見るとグリッド線が床石に乗った瞬間＝接地。R/C で合わせる。
+      case 'p': case 'P': {
+        sideView = !sideView;
+        gridPlane.visible = sideView ? true : gridPlane.visible;
+        setStatus(sideView ? 'サイドビューON（横から接地確認。R/C で床に合わせる／再度P で戻る）' : 'サイドビューOFF');
+        return;
+      }
       // 床の傾き診断（splat列挙。LODでは不可なことが判明。2点接地法を使う）
       case 'f': case 'F': {
         setStatus('床の傾きを診断中…（コンソール出力）');
@@ -679,7 +709,8 @@ async function main() {
         markA = { x: pos.x, z: pos.z, y: groundY };
         const r = (n) => Math.round(n * 1000) / 1000;
         console.log('[2点法] A地点:', JSON.stringify({ x: r(markA.x), z: r(markA.z), y: r(markA.y) }));
-        setStatus(`A地点マーク x=${r(markA.x)} z=${r(markA.z)} y=${r(markA.y)}（次にB地点へ移動し 2）`);
+        showMeasure();
+        setStatus(`A地点マーク（次にB地点へ移動し 2）`);
         return;
       }
       case '2': {
@@ -707,7 +738,13 @@ async function main() {
           進行方向: { ux: r(ux), uz: r(uz) },
           orient補正案_加算deg: { rx: r(corrRx), rz: r(corrRz) },
         }, null, 2));
-        setStatus(`勾配 ${r(slope)}（${r(tiltDeg)}°）dy=${r(dy)}m/${r(dist)}m｜補正 rx+=${r(corrRx)} rz+=${r(corrRz)}`);
+        // 画面左下に結果を大きく表示（DevTools 不要）。
+        lastResult =
+          `B: x=${r(B.x)} z=${r(B.z)} y=${r(B.y)}\n` +
+          `距離=${r(dist)}m  床高差dy=${r(dy)}m\n` +
+          `傾き=${r(tiltDeg)}°  勾配=${r(slope)}\n` +
+          `orient補正: rx+=${r(corrRx)}  rz+=${r(corrRz)}`;
+        showMeasure();
         return;
       }
       // stochastic（確率的透明）: ON で splat が深度を書く＝足/グリッドが正しく前後解決
@@ -732,6 +769,7 @@ async function main() {
     if (rot) applyGridRotation();
     if (ctrlModel) ctrlModel.position.y = groundY;
     if (avatar && avatar.model) avatar.model.position.y = groundY;
+    showMeasure(); // 画面左下の数値を更新
     // gridPlane の y は描画ループで groundY に追従。
   });
 
@@ -749,6 +787,12 @@ async function main() {
       gridMat.uniforms.uCenter.value.copy(follow.position);
     } else {
       gridPlane.position.y = groundY;
+    }
+    // サイドビュー: コントローラのカメラ更新後に上書きし、足元を真横から見る。
+    if (sideView && follow) {
+      const f = follow.position;
+      camera.position.set(f.x + 2.8, groundY + 0.35, f.z);
+      camera.lookAt(f.x, groundY + 0.1, f.z);
     }
     renderer.render(scene, camera);
     stats.tick();
