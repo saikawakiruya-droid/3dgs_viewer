@@ -370,6 +370,99 @@ async function frameCameraToSplat(splat, camera, controls) {
   controls.update();
 }
 
+/**
+ * 床の傾き診断（開発補助・F キー）。
+ * splat 中心をワールド座標でサンプリング → (x,z) セルごとの床高（下位2番目の y で
+ * floater を弾く）→ 平面 y = a·x + b·z + c を最小二乗フィットし、床の傾きを算出する。
+ * a=x方向勾配, b=z方向勾配。傾き角 = atan(勾配)。水平なら a,b≈0。
+ * 「社屋に近づくと足が埋まる」= その進行方向に床が上る（勾配が大きい）ことを数値で示す。
+ */
+function analyzeFloor(splat) {
+  if (!splat || typeof splat.forEachSplat !== 'function') {
+    console.warn('[床診断] splat が未ロード、または forEachSplat 非対応です');
+    return;
+  }
+  splat.updateMatrixWorld(true);
+  const m = splat.matrixWorld;
+  const v = new THREE.Vector3();
+  const R = 25;      // 水平窓（|x|,|z| < R）
+  const CELL = 1.0;  // セルサイズ
+  const total = splat.numSplats || splat.packedSplats?.numSplats || 0;
+  const step = Math.max(1, Math.floor(total / 300000));
+
+  // (x,z) セルごとに最小y2つ（min1<=min2）を保持し、min2 を床高とする（単発 floater 除去）。
+  const cells = new Map();
+  let i = 0, sampled = 0;
+  splat.forEachSplat((idx, center) => {
+    if (i++ % step !== 0) return;
+    v.copy(center).applyMatrix4(m);
+    if (Math.abs(v.x) > R || Math.abs(v.z) > R) return;
+    const cx = Math.round(v.x / CELL), cz = Math.round(v.z / CELL);
+    const k = cx + ',' + cz;
+    const c = cells.get(k);
+    if (!c) cells.set(k, { m1: v.y, m2: Infinity });
+    else if (v.y < c.m1) { c.m2 = c.m1; c.m1 = v.y; }
+    else if (v.y < c.m2) { c.m2 = v.y; }
+    sampled++;
+  });
+  if (cells.size < 8) {
+    console.warn(`[床診断] セル数が少なすぎます（${cells.size}）。データ充填前かもしれません`);
+    return;
+  }
+
+  // 最小二乗: [Sxx Sxz Sx; Sxz Szz Sz; Sx Sz N]·[a;b;c] = [Sxy; Szy; Sy]
+  let Sxx = 0, Sxz = 0, Sx = 0, Szz = 0, Sz = 0, N = 0, Sxy = 0, Szy = 0, Sy = 0;
+  const floorPts = [];
+  for (const [k, c] of cells) {
+    const [cx, cz] = k.split(',').map(Number);
+    const x = cx * CELL, z = cz * CELL;
+    const y = Number.isFinite(c.m2) ? c.m2 : c.m1;
+    floorPts.push([x, z, y]);
+    Sxx += x * x; Sxz += x * z; Sx += x; Szz += z * z; Sz += z; N += 1;
+    Sxy += x * y; Szy += z * y; Sy += y;
+  }
+  const det3 = (a) =>
+    a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
+    a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+    a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+  const M = [[Sxx, Sxz, Sx], [Sxz, Szz, Sz], [Sx, Sz, N]];
+  const D = det3(M);
+  if (Math.abs(D) < 1e-9) { console.warn('[床診断] 行列が特異でフィット不可'); return; }
+  const rhs = [Sxy, Szy, Sy];
+  const col = (M0, j, r) => M0.map((row, ri) => row.map((val, ci) => (ci === j ? r[ri] : val)));
+  const a = det3(col(M, 0, rhs)) / D;
+  const b = det3(col(M, 1, rhs)) / D;
+  const cc = det3(col(M, 2, rhs)) / D;
+
+  // 残差RMS（フィットの信頼度）
+  let se = 0;
+  for (const [x, z, y] of floorPts) { const e = a * x + b * z + cc - y; se += e * e; }
+  const rms = Math.sqrt(se / floorPts.length);
+
+  const DEG_ = 180 / Math.PI;
+  const tiltX = Math.atan(b) * DEG_; // z方向勾配 → X軸まわりの傾き
+  const tiltZ = Math.atan(a) * DEG_; // x方向勾配 → Z軸まわりの傾き
+  const slopeDeg = Math.atan(Math.hypot(a, b)) * DEG_;
+  const dirDeg = (Math.atan2(b, a) * DEG_ + 360) % 360; // 最急上り方向（xz平面, +xから反時計)
+
+  const at = (x, z) => (a * x + b * z + cc);
+  const r3 = (n) => Math.round(n * 1000) / 1000;
+  console.log(
+    '[床診断] 平面フィット結果\n' +
+    JSON.stringify({
+      サンプル数: sampled, セル数: cells.size, 残差RMS_m: r3(rms),
+      x方向勾配a: r3(a), z方向勾配b: r3(b), 切片c_床高at原点: r3(cc),
+      最急勾配deg: r3(slopeDeg), 最急上り方向deg: r3(dirDeg),
+      推定傾きX_deg: r3(tiltX), 推定傾きZ_deg: r3(tiltZ),
+      床高_spawn_2_n1: r3(at(2, -1)),
+      床高_z手前_0_10: r3(at(0, 10)),
+      床高_z奥_0_n10: r3(at(0, -10)),
+      補正案_orientに加算: { rx: r3(-tiltX), rz: r3(-tiltZ) },
+    }, null, 2)
+  );
+  return { a, b, c: cc, tiltX, tiltZ, slopeDeg, dirDeg, rms };
+}
+
 async function main() {
   const container = document.getElementById('canvas-container');
   const music = setupAudio(); // BGM（T キー＝体操開始で再生制御）
@@ -519,6 +612,7 @@ async function main() {
   // ── アバター（体操モード用の TaisoAvatar / 操作モード用の GLB 参照）──
   let avatar = null;
   let ctrlModel = null; // 操作モードの GLB（床高調整で参照）
+  let loadedSplat = null; // 読込済み SplatMesh（床傾き診断 F キーで参照）
 
   // ── 床高調整 & グリッド表示（操作モードの位置合わせ補助）──
   // PageUp/PageDown: 歩行面（アバター＋グリッド）を同時に上下。Shift で粗調整。
@@ -538,6 +632,12 @@ async function main() {
       case 'j': case 'J': gridTiltZ += tstep; rot = true; break;
       case 'l': case 'L': gridTiltZ -= tstep; rot = true; break;
       case 'g': case 'G': gridPlane.visible = !gridPlane.visible; break;
+      // 床の傾き診断（結果はコンソールへ）
+      case 'f': case 'F': {
+        setStatus('床の傾きを診断中…（コンソール出力）');
+        analyzeFloor(loadedSplat);
+        return;
+      }
       // stochastic（確率的透明）: ON で splat が深度を書く＝足/グリッドが正しく前後解決
       // （もや状の埋まり解消・splat が手前なら隠す）。代償に背景へディザノイズ。既定 OFF。
       case 'o': case 'O': {
@@ -630,6 +730,7 @@ async function main() {
     applyOrient(splat, orientOf(target)); // 向き（既定 rx=180 / per-scene orient）
     scene.add(splat);
     await loaded;
+    loadedSplat = splat; // 床傾き診断（F キー）用に参照を保持
     // カメラ: 操作モードは三人称カメラが所有するので枠取りしない。
     // 非操作モードのみ 手調整 camera{pos,look} → viewpoint → bbox 自動枠取り。
     if (controls) {
