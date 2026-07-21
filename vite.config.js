@@ -12,4 +12,9 @@ export default defineConfig({
   build: {
     target: 'es2020',
   },
+  // 一時的な外部公開（cloudflared 等のトンネル）用。VITE_TUNNEL=1 のときだけ
+  // 任意ホストからの dev サーバーアクセスを許可する。通常の dev/build には影響しない。
+  server: {
+    allowedHosts: process.env.VITE_TUNNEL === '1' ? true : undefined,
+  },
 });
