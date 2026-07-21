@@ -375,7 +375,17 @@ async function main() {
   const music = setupAudio(); // BGM（T キー＝体操開始で再生制御）
 
   // ── renderer ──
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // FPS チューニング（中品質の見た目は保ったまま GPU コストのみ削減）:
+  // - antialias:false … 3DGS splat は Spark 側の blurAmount で縁を柔らかくしており、
+  //   全画面 MSAA は splat にほぼ効かず GPU 塗りコストだけ増える。無効化しても背景は不変
+  //   （影響はアバターのポリゴン輪郭のみ）。
+  // - powerPreference:'high-performance' … デュアル GPU 機で discrete GPU を優先。
+  // - stencil:false … 未使用のステンシルバッファを持たない（帯域の無駄を削減）。
+  const renderer = new THREE.WebGLRenderer({
+    antialias: false,
+    powerPreference: 'high-performance',
+    stencil: false,
+  });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, RENDER_CONFIG.PIXEL_RATIO_MAX));
   renderer.setSize(window.innerWidth, window.innerHeight);
   container.appendChild(renderer.domElement);
