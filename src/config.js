@@ -35,7 +35,7 @@ export const LOAD_TIMEOUT_MS = 60_000;
 export const AUDIO_CONFIG = {
   ENABLED: true,
   URL: `${import.meta.env.BASE_URL}audio/taiso.mp3`,
-  LOOP: true,
+  LOOP: false, // 1回再生。曲が終わったら体操も idle に戻る（ラジオ体操1セット）。
   VOLUME: 0.7,
 };
 

@@ -170,6 +170,14 @@ export class AvaturnController extends BaseAvatarController {
   /** 体操中は再生位置を音楽にロックし、locomotion 遷移は止める。移動入力で歩行へ。 */
   updateAnimation(deltaTime) {
     if (this._emoting) {
+      // 曲が最後まで再生されたら体操も終了して idle へ（LOOP=false の1回再生）。
+      if (this.music && this.music.ended && this.music.ended()) {
+        this._emoting = false;
+        this.taisoAction.setEffectiveTimeScale(1);
+        this.taisoAction.fadeOut(0.3);
+        this.transitionToState(LocomotionState.IDLE);
+        return;
+      }
       // 体操の再生位置を音楽の再生位置に同期（timeScale=0 なので mixer は進めない）。
       const dur = this._taisoDuration();
       if (this.music && this.music.isPlaying() && dur > 0) {

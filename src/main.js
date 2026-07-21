@@ -122,6 +122,7 @@ function setupAudio() {
   audio.volume = AUDIO_CONFIG.VOLUME;
   return {
     isPlaying: () => !audio.paused,
+    ended: () => audio.ended, // ループ無しで最後まで再生し終えたか
     time: () => audio.currentTime,
     playFromStart() {
       try { audio.currentTime = 0; } catch (_) { /* noop */ }
