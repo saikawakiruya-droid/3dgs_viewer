@@ -555,8 +555,13 @@ async function main() {
   const measure = createMeasureUI();
   const rr = (n) => Math.round(n * 1000) / 1000;
   // 画面左下パネルを現在値で更新（床高・A地点・最新結果）。
+  const splatOrientDeg = () => loadedSplat
+    ? { rx: rr(loadedSplat.rotation.x / DEG), ry: rr(loadedSplat.rotation.y / DEG), rz: rr(loadedSplat.rotation.z / DEG) }
+    : null;
   const showMeasure = () => {
     let t = `床高(現在) y=${rr(groundY)}`;
+    const so = splatOrientDeg();
+    if (so) t += `\nsplat orient rx=${so.rx} rz=${so.rz}（↑↓←→で調整）`;
     if (markA) t += `\nA: x=${rr(markA.x)} z=${rr(markA.z)} y=${rr(markA.y)}`;
     if (lastResult) t += `\n${lastResult}`;
     measure.set(t);
@@ -677,6 +682,7 @@ async function main() {
     const tstep = e.shiftKey ? 0.02 : 0.005;     // 傾きステップ（rad）
     let handled = true;
     let rot = false;
+    let splatRot = false;
     switch (e.key) {
       // 床高（アバター＋グリッド同時）。Mac は PageUp/Down が無いため R/C も割当。
       case 'PageUp': case 'r': case 'R': groundY += step; break;
@@ -686,6 +692,11 @@ async function main() {
       case 'k': case 'K': gridTiltX -= tstep; rot = true; break;
       case 'j': case 'J': gridTiltZ += tstep; rot = true; break;
       case 'l': case 'L': gridTiltZ -= tstep; rot = true; break;
+      // splat 自体の傾き（床を水平化）: ↑↓=X軸, ←→=Z軸。歩いても足が埋まらない水平に合わせる。
+      case 'ArrowUp': if (loadedSplat) { loadedSplat.rotation.x += tstep; splatRot = true; } break;
+      case 'ArrowDown': if (loadedSplat) { loadedSplat.rotation.x -= tstep; splatRot = true; } break;
+      case 'ArrowLeft': if (loadedSplat) { loadedSplat.rotation.z += tstep; splatRot = true; } break;
+      case 'ArrowRight': if (loadedSplat) { loadedSplat.rotation.z -= tstep; splatRot = true; } break;
       case 'g': case 'G': gridPlane.visible = !gridPlane.visible; break;
       // 接地確認: 足元を真横から見るサイドビュー。グリッド線(=足の高さ)も同時表示。
       // 横から見るとグリッド線が床石に乗った瞬間＝接地。R/C で合わせる。
@@ -757,9 +768,14 @@ async function main() {
       }
       case 'b': case 'B': {
         const r = (n) => Math.round(n * 1000) / 1000;
-        const info = { 'POSITION.y': r(groundY), gridTiltX: r(gridTiltX), gridTiltZ: r(gridTiltZ) };
-        console.log('[viewer] 床合わせ値（config/main.js へ貼付）:', JSON.stringify(info));
-        setStatus(`床 y=${r(groundY)} tiltX=${r(gridTiltX)} tiltZ=${r(gridTiltZ)}（B出力）`);
+        const info = {
+          'POSITION.y': r(groundY),
+          'splat_orient_deg': splatOrientDeg(),
+          gridTiltX: r(gridTiltX), gridTiltZ: r(gridTiltZ),
+        };
+        console.log('[viewer] 床合わせ値（scenes.json orient / config へ貼付）:', JSON.stringify(info));
+        const so = splatOrientDeg();
+        setStatus(`床 y=${r(groundY)}｜splat orient rx=${so ? so.rx : '-'} rz=${so ? so.rz : '-'}（B出力）`);
         return;
       }
       default: handled = false;
@@ -767,6 +783,7 @@ async function main() {
     if (!handled) return;
     e.preventDefault();
     if (rot) applyGridRotation();
+    if (splatRot && loadedSplat) loadedSplat.updateMatrixWorld(true);
     if (ctrlModel) ctrlModel.position.y = groundY;
     if (avatar && avatar.model) avatar.model.position.y = groundY;
     showMeasure(); // 画面左下の数値を更新
