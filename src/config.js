@@ -50,7 +50,7 @@ export const AVATAR_CONFIG = {
   CONTROLLABLE: true,
   MODEL_URL: `${import.meta.env.BASE_URL}model.glb`,
   BVH_URL: `${import.meta.env.BASE_URL}neccos_taiso.bvh`,
-  POSITION: { x: 2, y: 0, z: -1 }, // 初期配置（要調整）
+  POSITION: { x: 2, y: 0.3, z: -1 }, // 初期配置。y=床高（足の埋まり調整。PageUp/Downで微調整可）
   ROTATION_Y: 0,
   SCALE: 1,
   LOOP: true,
@@ -73,7 +73,7 @@ export const SPARK_CONFIG = {
 // - maxStdDev: splat の裾クリップ / - blurAmount: AA 膨張 / - pixelRatio: 描画解像度上限
 export const QUALITY_PRESETS = {
   high:   { lodSplatCount: 5_000_000, lodRenderScale: 0.5, maxStdDev: 3.5,  blurAmount: 0.2,  pixelRatio: 2 },
-  medium: { lodSplatCount: 2_500_000, lodRenderScale: 1.0, maxStdDev: 2.83, blurAmount: 0.2,  pixelRatio: 1.5 },
+  medium: { lodSplatCount: 2_500_000, lodRenderScale: 1.0, maxStdDev: 2.4,  blurAmount: 0.2,  pixelRatio: 1.5 },
   low:    { lodSplatCount: 1_200_000, lodRenderScale: 1.0, maxStdDev: 2.83, blurAmount: 0.3,  pixelRatio: 1 },
   vlow:   { lodSplatCount: 500_000,   lodRenderScale: 1.5, maxStdDev: 2.83, blurAmount: 0.35, pixelRatio: 1 },
 };

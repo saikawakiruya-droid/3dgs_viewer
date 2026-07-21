@@ -405,6 +405,60 @@ async function main() {
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
+  // ── 歩行面グリッド（位置関係の可視化・追従＋距離フェード）──
+  // 問題点の対処: 巨大な一枚グリッドは遠方が地平線方向へ伸び、深度を書かない splat の
+  // 手前（社殿など）に線が突き抜けて見える。そこで「アバター周辺だけ表示し遠方はフェード
+  // アウトする追従グリッド」にする。マス目はワールド固定（世界座標で計算）、フェード中心が
+  // アバターに追従する。高さ groundY は PageUp/Down で床に合わせる。G で表示トグル。
+  let groundY = AVATAR_CONFIG.POSITION.y;
+  let gridTiltX = 0; // 前後の傾き（rad）。傾いた splat 床に合わせる。
+  let gridTiltZ = 0; // 左右の傾き（rad）。
+  const GRID_RADIUS = 9; // これを超えると完全に消える（社殿まで届かない）
+  const gridMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    extensions: { derivatives: true }, // WebGL1 用（WebGL2 では core）
+    uniforms: {
+      uCenter: { value: new THREE.Vector3() }, // フェード中心（アバターのワールド座標）
+      uCell: { value: 1.0 },                   // マス 1 単位
+      uRadius: { value: GRID_RADIUS },
+      uColor: { value: new THREE.Color(0x66ccff) },
+    },
+    vertexShader: `
+      varying vec3 vWorld;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      precision highp float;
+      varying vec3 vWorld;
+      uniform vec3 uCenter; uniform float uCell; uniform float uRadius; uniform vec3 uColor;
+      void main() {
+        vec2 p = vWorld.xz / uCell;                       // ワールド固定のマス目
+        vec2 g = abs(fract(p - 0.5) - 0.5) / fwidth(p);   // 線までの距離（AA）
+        float line = 1.0 - min(min(g.x, g.y), 1.0);
+        float d = distance(vWorld.xz, uCenter.xz);
+        float fade = 1.0 - smoothstep(uRadius * 0.5, uRadius, d); // 半径でフェード
+        float a = line * fade * 0.6;
+        if (a < 0.01) discard;
+        gl_FragColor = vec4(uColor, a);
+      }`,
+  });
+  // 追従面はフェード半径を覆うサイズ（直径 + マージン）。XZ 平面へ寝かせる。
+  const gridPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(GRID_RADIUS * 2 + 4, GRID_RADIUS * 2 + 4),
+    gridMat
+  );
+  gridPlane.position.y = groundY;
+  gridPlane.renderOrder = 1;
+  gridPlane.visible = false; // 既定は非表示（開発時のみ G キーで表示）。本番では出さない。
+  // 水平（-90°）を基準に、前後(X)・左右(Z)の傾きを足して床の傾斜へ合わせる。
+  const applyGridRotation = () => gridPlane.rotation.set(-Math.PI / 2 + gridTiltX, 0, gridTiltZ);
+  applyGridRotation();
+  scene.add(gridPlane);
+
   const camera = new THREE.PerspectiveCamera(
     RENDER_CONFIG.CAMERA_FOV,
     window.innerWidth / window.innerHeight,
@@ -462,8 +516,52 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // ── アバター（体操モード用の TaisoAvatar 参照）──
+  // ── アバター（体操モード用の TaisoAvatar / 操作モード用の GLB 参照）──
   let avatar = null;
+  let ctrlModel = null; // 操作モードの GLB（床高調整で参照）
+
+  // ── 床高調整 & グリッド表示（操作モードの位置合わせ補助）──
+  // PageUp/PageDown: 歩行面（アバター＋グリッド）を同時に上下。Shift で粗調整。
+  // G: グリッド表示トグル。B: 現在の床高（POSITION.y）を console 出力。
+  window.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 0.25 : 0.05;      // 高さステップ
+    const tstep = e.shiftKey ? 0.02 : 0.005;     // 傾きステップ（rad）
+    let handled = true;
+    let rot = false;
+    switch (e.key) {
+      // 床高（アバター＋グリッド同時）
+      case 'PageUp': groundY += step; break;
+      case 'PageDown': groundY -= step; break;
+      // グリッドの傾き（床の傾斜合わせ）: I/K=前後, J/L=左右
+      case 'i': case 'I': gridTiltX += tstep; rot = true; break;
+      case 'k': case 'K': gridTiltX -= tstep; rot = true; break;
+      case 'j': case 'J': gridTiltZ += tstep; rot = true; break;
+      case 'l': case 'L': gridTiltZ -= tstep; rot = true; break;
+      case 'g': case 'G': gridPlane.visible = !gridPlane.visible; break;
+      // stochastic（確率的透明）: ON で splat が深度を書く＝足/グリッドが正しく前後解決
+      // （もや状の埋まり解消・splat が手前なら隠す）。代償に背景へディザノイズ。既定 OFF。
+      case 'o': case 'O': {
+        const v = spark.defaultView;
+        v.stochastic = !v.stochastic;
+        setStatus(`深度書込(stochastic) ${v.stochastic ? 'ON（埋まり解消・ノイズ有）' : 'OFF（従来画質）'}`);
+        return;
+      }
+      case 'b': case 'B': {
+        const r = (n) => Math.round(n * 1000) / 1000;
+        const info = { 'POSITION.y': r(groundY), gridTiltX: r(gridTiltX), gridTiltZ: r(gridTiltZ) };
+        console.log('[viewer] 床合わせ値（config/main.js へ貼付）:', JSON.stringify(info));
+        setStatus(`床 y=${r(groundY)} tiltX=${r(gridTiltX)} tiltZ=${r(gridTiltZ)}（B出力）`);
+        return;
+      }
+      default: handled = false;
+    }
+    if (!handled) return;
+    e.preventDefault();
+    if (rot) applyGridRotation();
+    if (ctrlModel) ctrlModel.position.y = groundY;
+    if (avatar && avatar.model) avatar.model.position.y = groundY;
+    // gridPlane の y は描画ループで groundY に追従。
+  });
 
   // ── render loop ──
   const clock = new THREE.Clock();
@@ -472,6 +570,14 @@ async function main() {
     if (controls) controls.update();
     if (avatarController) avatarController.update(dt); // 操作モード（移動＋カメラ追従＋アニメ）
     else if (avatar) avatar.update(dt); // 体操モード
+    // 追従グリッド: フェード中心と面をアバターへ、高さを床高へ同期。
+    const follow = ctrlModel || (avatar && avatar.model);
+    if (follow) {
+      gridPlane.position.set(follow.position.x, groundY, follow.position.z);
+      gridMat.uniforms.uCenter.value.copy(follow.position);
+    } else {
+      gridPlane.position.y = groundY;
+    }
     renderer.render(scene, camera);
     stats.tick();
   });
@@ -549,9 +655,10 @@ async function main() {
         const gltf = await new GLTFLoader().loadAsync(AVATAR_CONFIG.MODEL_URL);
         const model = gltf.scene;
         model.scale.setScalar(AVATAR_CONFIG.SCALE);
-        model.position.set(pos.x, pos.y, pos.z);
+        model.position.set(pos.x, groundY, pos.z); // y は床高（PageUp/Down で調整）
         model.rotation.y = AVATAR_CONFIG.ROTATION_Y;
         scene.add(model);
+        ctrlModel = model;
         avatarController.setModel(model);
         console.log('[viewer] 操作アバター読込完了（WASD 移動 / マウスでカメラ / T で体操）');
         setStatus(`表示中: ${target.label}（WASD移動・マウスでカメラ・Tで体操）`);
