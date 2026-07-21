@@ -510,6 +510,10 @@ async function main() {
   const container = document.getElementById('canvas-container');
   const music = setupAudio(); // BGM（T キー＝体操開始で再生制御）
 
+  // 開発補助（床測定パネル・グリッド・調整キー等）は ?debug=1 のときだけ有効化。
+  // 通常アクセス（本番）では一切表示・反応しない。
+  const DEBUG = new URLSearchParams(location.search).has('debug');
+
   // ── renderer ──
   // FPS チューニング（中品質の見た目は保ったまま GPU コストのみ削減）:
   // - antialias:false … 3DGS splat は Spark 側の blurAmount で縁を柔らかくしており、
@@ -552,13 +556,14 @@ async function main() {
   let markA = null;  // 2点接地法の A 地点 { x, z, y }
   let sideView = false; // 足元を真横から見る接地確認ビュー（P キー）
   let lastResult = '';  // 2点法の最新結果（画面表示用）
-  const measure = createMeasureUI();
+  const measure = DEBUG ? createMeasureUI() : null;
   const rr = (n) => Math.round(n * 1000) / 1000;
-  // 画面左下パネルを現在値で更新（床高・A地点・最新結果）。
+  // 画面左下パネルを現在値で更新（床高・A地点・最新結果）。DEBUG 時のみ。
   const splatOrientDeg = () => loadedSplat
     ? { rx: rr(loadedSplat.rotation.x / DEG), ry: rr(loadedSplat.rotation.y / DEG), rz: rr(loadedSplat.rotation.z / DEG) }
     : null;
   const showMeasure = () => {
+    if (!measure) return;
     let t = `床高(現在) y=${rr(groundY)}`;
     const so = splatOrientDeg();
     if (so) t += `\nsplat orient rx=${so.rx} rz=${so.rz}（↑↓←→で調整）`;
@@ -652,6 +657,7 @@ async function main() {
   // ── 視点キャプチャ（開発補助・非操作モードのみ）──
   // V キーで現在のカメラを scenes.json の "camera": { pos, look } 形式で console 出力。
   window.addEventListener('keydown', (e) => {
+    if (!DEBUG) return; // 視点キャプチャは開発補助
     if (!controls) return;
     if (e.key !== 'v' && e.key !== 'V') return;
     const r = (n) => Math.round(n * 1000) / 1000;
@@ -678,6 +684,7 @@ async function main() {
   // PageUp/PageDown: 歩行面（アバター＋グリッド）を同時に上下。Shift で粗調整。
   // G: グリッド表示トグル。B: 現在の床高（POSITION.y）を console 出力。
   window.addEventListener('keydown', (e) => {
+    if (!DEBUG) return; // 開発補助キーは ?debug=1 のときのみ
     const step = e.shiftKey ? 0.25 : 0.05;      // 高さステップ
     const tstep = e.shiftKey ? 0.02 : 0.005;     // 傾きステップ（rad）
     let handled = true;
@@ -818,6 +825,7 @@ async function main() {
   // ── アバター配置調整（開発補助）──
   // 矢印: X/Z 移動 / PageUp・Down: Y 移動 / [ ]: スケール / , .: Y回転 / B: 現在値を出力。
   window.addEventListener('keydown', (e) => {
+    if (!DEBUG) return; // アバター配置調整は開発補助
     if (!avatar || !avatar.model) return;
     const m = avatar.model;
     const step = e.shiftKey ? 0.5 : 0.1;
