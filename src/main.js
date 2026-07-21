@@ -656,9 +656,9 @@ async function main() {
     let handled = true;
     let rot = false;
     switch (e.key) {
-      // 床高（アバター＋グリッド同時）
-      case 'PageUp': groundY += step; break;
-      case 'PageDown': groundY -= step; break;
+      // 床高（アバター＋グリッド同時）。Mac は PageUp/Down が無いため R/C も割当。
+      case 'PageUp': case 'r': case 'R': groundY += step; break;
+      case 'PageDown': case 'c': case 'C': groundY -= step; break;
       // グリッドの傾き（床の傾斜合わせ）: I/K=前後, J/L=左右
       case 'i': case 'I': gridTiltX += tstep; rot = true; break;
       case 'k': case 'K': gridTiltX -= tstep; rot = true; break;
