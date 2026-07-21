@@ -378,35 +378,67 @@ async function frameCameraToSplat(splat, camera, controls) {
  * 「社屋に近づくと足が埋まる」= その進行方向に床が上る（勾配が大きい）ことを数値で示す。
  */
 function analyzeFloor(splat) {
-  if (!splat || typeof splat.forEachSplat !== 'function') {
-    console.warn('[床診断] splat が未ロード、または forEachSplat 非対応です');
-    return;
-  }
+  if (!splat) { console.warn('[床診断] splat が未ロード'); return; }
   splat.updateMatrixWorld(true);
   const m = splat.matrixWorld;
   const v = new THREE.Vector3();
-  const R = 25;      // 水平窓（|x|,|z| < R）
-  const CELL = 1.0;  // セルサイズ
-  const total = splat.numSplats || splat.packedSplats?.numSplats || 0;
-  const step = Math.max(1, Math.floor(total / 300000));
+  const CELL = 1.0; // セルサイズ
 
-  // (x,z) セルごとに最小y2つ（min1<=min2）を保持し、min2 を床高とする（単発 floater 除去）。
+  // 列挙ソースを順に試す（LOD では SplatMesh 直下が 0 のことがある）。
+  const sources = [
+    ['splat', splat],
+    ['splat.packedSplats', splat.packedSplats],
+    ['splat.splats', splat.splats],
+  ];
+  console.log('[床診断] カウント:',
+    JSON.stringify({
+      'splat.numSplats': splat.numSplats ?? null,
+      'packedSplats.numSplats': splat.packedSplats?.numSplats ?? null,
+      'splats.numSplats': splat.splats?.numSplats ?? null,
+    })
+  );
+
+  // ワールド座標の bbox（スケール/オフセット把握用）と (x,z) セル床高を集める。
   const cells = new Map();
-  let i = 0, sampled = 0;
-  splat.forEachSplat((idx, center) => {
-    if (i++ % step !== 0) return;
-    v.copy(center).applyMatrix4(m);
-    if (Math.abs(v.x) > R || Math.abs(v.z) > R) return;
-    const cx = Math.round(v.x / CELL), cz = Math.round(v.z / CELL);
-    const k = cx + ',' + cz;
-    const c = cells.get(k);
-    if (!c) cells.set(k, { m1: v.y, m2: Infinity });
-    else if (v.y < c.m1) { c.m2 = c.m1; c.m1 = v.y; }
-    else if (v.y < c.m2) { c.m2 = v.y; }
-    sampled++;
-  });
+  const bb = { minx: Infinity, maxx: -Infinity, miny: Infinity, maxy: -Infinity, minz: Infinity, maxz: -Infinity };
+  let raw = 0, srcUsed = null;
+  const runOn = (obj) => {
+    if (!obj || typeof obj.forEachSplat !== 'function') return 0;
+    let n = 0;
+    obj.forEachSplat((idx, center) => {
+      v.copy(center).applyMatrix4(m);
+      n++;
+      if (v.x < bb.minx) bb.minx = v.x; if (v.x > bb.maxx) bb.maxx = v.x;
+      if (v.y < bb.miny) bb.miny = v.y; if (v.y > bb.maxy) bb.maxy = v.y;
+      if (v.z < bb.minz) bb.minz = v.z; if (v.z > bb.maxz) bb.maxz = v.z;
+      const cx = Math.round(v.x / CELL), cz = Math.round(v.z / CELL);
+      const k = cx + ',' + cz;
+      const c = cells.get(k);
+      if (!c) cells.set(k, { m1: v.y, m2: Infinity });
+      else if (v.y < c.m1) { c.m2 = c.m1; c.m1 = v.y; }
+      else if (v.y < c.m2) { c.m2 = v.y; }
+    });
+    return n;
+  };
+  for (const [name, obj] of sources) {
+    raw = runOn(obj);
+    if (raw > 0) { srcUsed = name; break; }
+    cells.clear();
+  }
+  const r3 = (n) => Math.round(n * 1000) / 1000;
+  console.log('[床診断] 列挙結果:', JSON.stringify({
+    使用ソース: srcUsed, 反復数: raw, セル数: cells.size,
+    worldBBox: srcUsed ? {
+      x: [r3(bb.minx), r3(bb.maxx)], y: [r3(bb.miny), r3(bb.maxy)], z: [r3(bb.minz), r3(bb.maxz)],
+    } : null,
+  }, null, 2));
+  if (raw === 0) {
+    console.warn('[床診断] どのソースからも splat 中心を列挙できませんでした。' +
+      'LOD(RAD) は splat データが Worker 常駐で main スレッドから列挙不可の可能性大。別手法を検討します。');
+    return;
+  }
   if (cells.size < 8) {
-    console.warn(`[床診断] セル数が少なすぎます（${cells.size}）。データ充填前かもしれません`);
+    console.warn(`[床診断] セル数が少なすぎます（${cells.size}）`);
     return;
   }
 
@@ -440,13 +472,13 @@ function analyzeFloor(splat) {
   const rms = Math.sqrt(se / floorPts.length);
 
   const DEG_ = 180 / Math.PI;
+  const sampled = raw;
   const tiltX = Math.atan(b) * DEG_; // z方向勾配 → X軸まわりの傾き
   const tiltZ = Math.atan(a) * DEG_; // x方向勾配 → Z軸まわりの傾き
   const slopeDeg = Math.atan(Math.hypot(a, b)) * DEG_;
   const dirDeg = (Math.atan2(b, a) * DEG_ + 360) % 360; // 最急上り方向（xz平面, +xから反時計)
 
   const at = (x, z) => (a * x + b * z + cc);
-  const r3 = (n) => Math.round(n * 1000) / 1000;
   console.log(
     '[床診断] 平面フィット結果\n' +
     JSON.stringify({
@@ -506,6 +538,7 @@ async function main() {
   let groundY = AVATAR_CONFIG.POSITION.y;
   let gridTiltX = 0; // 前後の傾き（rad）。傾いた splat 床に合わせる。
   let gridTiltZ = 0; // 左右の傾き（rad）。
+  let markA = null;  // 2点接地法の A 地点 { x, z, y }
   const GRID_RADIUS = 9; // これを超えると完全に消える（社殿まで届かない）
   const gridMat = new THREE.ShaderMaterial({
     transparent: true,
@@ -632,10 +665,49 @@ async function main() {
       case 'j': case 'J': gridTiltZ += tstep; rot = true; break;
       case 'l': case 'L': gridTiltZ -= tstep; rot = true; break;
       case 'g': case 'G': gridPlane.visible = !gridPlane.visible; break;
-      // 床の傾き診断（結果はコンソールへ）
+      // 床の傾き診断（splat列挙。LODでは不可なことが判明。2点接地法を使う）
       case 'f': case 'F': {
         setStatus('床の傾きを診断中…（コンソール出力）');
         analyzeFloor(loadedSplat);
+        return;
+      }
+      // 2点接地法: 1=A地点マーク, 2=B地点マーク＋勾配/傾き/orient補正を自動計算。
+      // 使い方: 各地点で PageUp/Down で足を床に接地させてから 1(手前)→移動→2(社屋付近)。
+      case '1': {
+        const pos = ctrlModel ? ctrlModel.position : (avatar && avatar.model && avatar.model.position);
+        if (!pos) { setStatus('アバター未読込'); return; }
+        markA = { x: pos.x, z: pos.z, y: groundY };
+        const r = (n) => Math.round(n * 1000) / 1000;
+        console.log('[2点法] A地点:', JSON.stringify({ x: r(markA.x), z: r(markA.z), y: r(markA.y) }));
+        setStatus(`A地点マーク x=${r(markA.x)} z=${r(markA.z)} y=${r(markA.y)}（次にB地点へ移動し 2）`);
+        return;
+      }
+      case '2': {
+        const pos = ctrlModel ? ctrlModel.position : (avatar && avatar.model && avatar.model.position);
+        if (!pos) { setStatus('アバター未読込'); return; }
+        if (!markA) { setStatus('先に A 地点を 1 でマークしてください'); return; }
+        const B = { x: pos.x, z: pos.z, y: groundY };
+        const dx = B.x - markA.x, dz = B.z - markA.z, dy = B.y - markA.y;
+        const dist = Math.hypot(dx, dz);
+        const r = (n) => Math.round(n * 1000) / 1000;
+        if (dist < 0.5) { setStatus('A/B が近すぎます（1m以上離してください）'); return; }
+        const slope = dy / dist;                       // 進行方向の勾配
+        const DEG_ = 180 / Math.PI;
+        const tiltDeg = Math.atan(slope) * DEG_;        // 進行方向の傾き角
+        const ux = dx / dist, uz = dz / dist;           // 進行方向の単位ベクトル
+        // 勾配が進行方向に沿うと仮定して各軸成分に分解 → orient 補正。
+        const aSlope = slope * ux, bSlope = slope * uz; // dy/dx, dy/dz
+        const corrRx = -Math.atan(bSlope) * DEG_;
+        const corrRz = -Math.atan(aSlope) * DEG_;
+        console.log('[2点法] 結果:', JSON.stringify({
+          A: { x: r(markA.x), z: r(markA.z), y: r(markA.y) },
+          B: { x: r(B.x), z: r(B.z), y: r(B.y) },
+          水平距離m: r(dist), 床高差dy_m: r(dy),
+          進行方向勾配: r(slope), 進行方向傾きdeg: r(tiltDeg),
+          進行方向: { ux: r(ux), uz: r(uz) },
+          orient補正案_加算deg: { rx: r(corrRx), rz: r(corrRz) },
+        }, null, 2));
+        setStatus(`勾配 ${r(slope)}（${r(tiltDeg)}°）dy=${r(dy)}m/${r(dist)}m｜補正 rx+=${r(corrRx)} rz+=${r(corrRz)}`);
         return;
       }
       // stochastic（確率的透明）: ON で splat が深度を書く＝足/グリッドが正しく前後解決
